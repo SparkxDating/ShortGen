@@ -1,0 +1,99 @@
+# Phase 1 SaaS stack. The original docker-compose.yml (Streamlit 8501 + legacy API 8080)
+# is unchanged and remains the supported way to run the legacy application.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mpt
+      POSTGRES_PASSWORD: mpt
+      POSTGRES_DB: moneyprinterturbo
+    ports:
+      - "5432:5432"
+    volumes:
+      - saas_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mpt -d moneyprinterturbo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+psycopg://mpt:mpt@postgres:5432/moneyprinterturbo
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      JWT_EXPIRE_MINUTES: 1440
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      STORAGE_PROVIDER: local
+      STORAGE_PATH: /MoneyPrinterTurbo/storage/saas
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ./:/MoneyPrinterTurbo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/worker.Dockerfile
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+psycopg://mpt:mpt@postgres:5432/moneyprinterturbo
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      STORAGE_PROVIDER: local
+      STORAGE_PATH: /MoneyPrinterTurbo/storage/saas
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ./:/MoneyPrinterTurbo
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  saas_pg_data:

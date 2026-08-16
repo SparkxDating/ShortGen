@@ -1,0 +1,49 @@
+from fastapi import APIRouter, Depends, Query, Request, status
+from sqlalchemy.orm import Session
+
+from apps.api.api.deps import queue_from_app
+from apps.api.auth.dependencies import get_current_user
+from apps.api.database.session import get_db
+from apps.api.models.user import User
+from apps.api.schemas.video import VideoCreate, VideoResponse
+from apps.api.services import video_service
+
+router = APIRouter()
+
+
+@router.get("", response_model=list[VideoResponse])
+def list_videos(
+    workspace_id: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[VideoResponse]:
+    return video_service.list_videos(db, current_user.id, workspace_id, project_id)
+
+
+@router.post("", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
+def create_video(
+    payload: VideoCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VideoResponse:
+    return video_service.create_video(db, queue_from_app(request), current_user.id, payload)
+
+
+@router.get("/{video_id}", response_model=VideoResponse)
+def get_video(
+    video_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> VideoResponse:
+    return video_service.get_video(db, video_id, current_user.id)
+
+
+@router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_video(
+    video_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    video_service.delete_video(db, video_id, current_user.id)

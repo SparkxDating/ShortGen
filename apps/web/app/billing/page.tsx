@@ -50,8 +50,12 @@ export default function BillingPage() {
     setError("");
     try {
       const result = await api.checkout(workspace.id, kind, itemId);
-      if (result.checkout_url) {
+      if (result.provider !== "local" && result.checkout_url) {
         window.location.href = result.checkout_url;
+        return;
+      }
+      if (result.provider !== "local" && !result.completed) {
+        setError(result.message || "Complete payment with the billing provider. Credits are added only after a verified webhook.");
         return;
       }
       await refresh();

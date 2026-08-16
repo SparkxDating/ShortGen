@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import socket
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
+from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
@@ -36,19 +40,35 @@ class JobRunner:
         self.queue = queue
         self.storage = storage
         self.adapter_factory = adapter_factory or MoneyPrinterTurboGenerationAdapter
+        self.worker_id = f"{socket.gethostname()}:{uuid4().hex[:8]}"
 
     def process_job(self, job_id: str) -> Job:
         job = self.db.get(Job, job_id)
         if job is None:
             raise RuntimeError(f"job not found: {job_id}")
+        if job.status in {JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value}:
+            return job
         if job.status == JobStatus.CANCELLED.value or self.queue.is_cancelled(job_id):
             job.status = JobStatus.CANCELLED.value
             job.current_stage = "CANCELLED"
             self.db.commit()
             return job
+        if (
+            job.status == JobStatus.RUNNING.value
+            and job.heartbeat_at
+            and (datetime.now(timezone.utc) - job.heartbeat_at).total_seconds() < 60
+            and job.worker_id
+            and job.worker_id != self.worker_id
+        ):
+            logger.info("skip concurrent lease job_id=%s worker=%s", job.id, job.worker_id)
+            return job
 
+        now = datetime.now(timezone.utc)
         job.status = JobStatus.RUNNING.value
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = now
+        job.attempt_started_at = now
+        job.heartbeat_at = now
+        job.worker_id = self.worker_id
         job.current_stage = "ANALYZING"
         job.progress = stage_progress("ANALYZING")
         job.error_message = None
@@ -67,11 +87,12 @@ class JobRunner:
                 raise GenerationCancelled("generation cancelled")
             job.current_stage = stage
             job.progress = progress
+            job.heartbeat_at = datetime.now(timezone.utc)
             if video:
                 video.progress = progress
                 video.status = VideoStatus.processing.value
             self.db.commit()
-            logger.info("job %s stage=%s progress=%s extra=%s", job.id, stage, progress, extra)
+            logger.info("job_stage job_id=%s workspace_id=%s stage=%s progress=%s", job.id, job.workspace_id, stage, progress)
 
         try:
             payload = dict(job.input_data or {})
@@ -88,7 +109,8 @@ class JobRunner:
             if result.primary_video_path:
                 key = f"workspaces/{job.workspace_id}/videos/{job.video_id}/final.mp4"
                 stored = self.storage.upload_file(result.primary_video_path, key, "video/mp4")
-                video_url = self.storage.get_public_url(stored)
+                signer = getattr(self.storage, "get_signed_url", None)
+                video_url = signer(stored) if callable(signer) else self.storage.get_public_url(stored)
             job.status = JobStatus.COMPLETED.value
             job.current_stage = "COMPLETED"
             job.progress = 100
@@ -111,6 +133,7 @@ class JobRunner:
 
             credit_service.capture(self.db, job.workspace_id, job.id, retry_count=job.retry_count or 0)
             self.db.commit()
+            logger.info("job_completed job_id=%s workspace_id=%s video_id=%s", job.id, job.workspace_id, job.video_id)
             return job
         except GenerationCancelled:
             job.status = JobStatus.CANCELLED.value
@@ -125,9 +148,10 @@ class JobRunner:
                 self.db, job.workspace_id, job.id, "Generation cancelled", retry_count=job.retry_count or 0
             )
             self.db.commit()
+            logger.info("job_cancelled job_id=%s workspace_id=%s", job.id, job.workspace_id)
             return job
         except (GenerationError, Exception) as exc:
-            logger.exception("job %s failed", job.id)
+            logger.exception("job_failed job_id=%s workspace_id=%s", job.id, job.workspace_id)
             job.status = JobStatus.FAILED.value
             job.current_stage = "FAILED"
             job.error_message = str(exc) or "generation failed"
@@ -142,6 +166,19 @@ class JobRunner:
             )
             self.db.commit()
             return job
+        finally:
+            self._cleanup_work_dir(job_id)
+
+    def _cleanup_work_dir(self, job_id: str) -> None:
+        from apps.api.bootstrap import REPO_ROOT
+
+        root = (REPO_ROOT / "storage" / "saas-work").resolve()
+        target = (root / job_id).resolve()
+        try:
+            if str(target).startswith(str(root)) and target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+        except Exception:
+            logger.warning("temp cleanup skipped job_id=%s", job_id)
 
     def _material_payload(self, job: Job, payload: dict[str, Any]) -> dict[str, Any]:
         asset_ids = list(payload.get("asset_ids") or [])

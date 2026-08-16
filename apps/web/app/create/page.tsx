@@ -37,11 +37,27 @@ function CreateForm() {
 
   useEffect(() => {
     if (!workspaceId) return;
-    Promise.all([api.projects(workspaceId), api.templates(workspaceId), api.assets(workspaceId)])
-      .then(([nextProjects, nextTemplates, nextAssets]) => {
-        setProjects(nextProjects);
+    Promise.all([
+      api.projects(workspaceId),
+      api.templates(workspaceId),
+      api.assets(workspaceId),
+      api.estimate(30, "1080p"),
+    ])
+      .then(async ([nextProjects, nextTemplates, nextAssets, nextEstimate]) => {
+        let loaded = nextProjects;
+        if (loaded.length === 0) {
+          loaded = [
+            await api.createProject({
+              workspace_id: workspaceId,
+              name: "My First Project",
+              description: "Created automatically.",
+            }),
+          ];
+        }
+        setProjects(loaded);
         setTemplates(nextTemplates);
         setAssets(nextAssets);
+        setEstimate(nextEstimate.credits);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
   }, [workspaceId]);
@@ -95,9 +111,19 @@ function CreateForm() {
     setLoading(true);
     const form = new FormData(event.currentTarget);
     try {
+      let projectId = String(form.get("project_id") || "");
+      if (!projectId) {
+        const created = await api.createProject({
+          workspace_id: workspaceId,
+          name: "My First Project",
+          description: "Created automatically.",
+        });
+        projectId = created.id;
+        setProjects((current) => (current.some((item) => item.id === created.id) ? current : [...current, created]));
+      }
       const video = await api.createVideo({
-        workspace_id: String(form.get("workspace_id")),
-        project_id: String(form.get("project_id")),
+        workspace_id: String(form.get("workspace_id") || workspaceId),
+        project_id: projectId,
         title: String(form.get("title")),
         topic: String(form.get("topic")),
         video_language: String(form.get("video_language")),
@@ -112,7 +138,12 @@ function CreateForm() {
       });
       router.push(`/videos/${video.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not start generation");
+      const message = err instanceof Error ? err.message : "Could not start generation";
+      setError(
+        message.toLowerCase().includes("credit")
+          ? message
+          : message,
+      );
     } finally {
       setLoading(false);
     }
@@ -322,12 +353,9 @@ function CreateForm() {
             >
               Recalculate credits
             </Button>
-            <Button type="submit" disabled={loading || projects.length === 0}>
+            <Button type="submit" disabled={loading || !workspaceId}>
               {loading ? "Starting…" : "Generate Video"}
             </Button>
-            {projects.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Create a project first.</p>
-            ) : null}
           </form>
         </CardContent>
       </Card>

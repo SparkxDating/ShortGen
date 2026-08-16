@@ -2,17 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 import math
+import threading
+from collections import defaultdict
 from datetime import datetime, timezone
 
+_wallet_guards: dict[str, threading.Lock] = defaultdict(threading.Lock)
+_wallet_guards_lock = threading.Lock()
+
+
+def _workspace_mutex(workspace_id: str) -> threading.Lock:
+    with _wallet_guards_lock:
+        return _wallet_guards[workspace_id]
+
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.api.models.billing import CreditLedger, CreditWallet, Plan, Subscription
 from apps.api.models.job import Job
 from apps.api.models.video import Video  # noqa: F401
 from apps.api.schemas.billing import EstimateResponse, PlanResponse, UsageResponse
-from apps.api.services.errors import ConflictError, ServiceError
+from apps.api.observability import log_event
+from apps.api.services.errors import ServiceError
+
+logger = logging.getLogger("saas.credits")
 
 FREE_PLAN_SLUG = "free"
 SIGNUP_CREDITS = 100
@@ -32,13 +47,30 @@ def estimate_credits(duration: int | float | None, resolution: str = "1080p") ->
 
 
 def ensure_wallet(db: Session, workspace_id: str) -> CreditWallet:
-    wallet = db.scalar(select(CreditWallet).where(CreditWallet.workspace_id == workspace_id))
+    return _lock_wallet(db, workspace_id)
+
+
+def _lock_wallet(db: Session, workspace_id: str) -> CreditWallet:
+    wallet = db.scalar(
+        select(CreditWallet).where(CreditWallet.workspace_id == workspace_id).with_for_update()
+    )
     if wallet:
         return wallet
     wallet = CreditWallet(workspace_id=workspace_id, balance=0, reserved=0)
     db.add(wallet)
-    db.flush()
-    return wallet
+    try:
+        db.flush()
+    except IntegrityError:
+        db.flush()
+        wallet = db.scalar(
+            select(CreditWallet).where(CreditWallet.workspace_id == workspace_id).with_for_update()
+        )
+        if wallet is None:
+            raise
+        return wallet
+    return db.scalar(
+        select(CreditWallet).where(CreditWallet.workspace_id == workspace_id).with_for_update()
+    ) or wallet
 
 
 def _ledger_exists(db: Session, workspace_id: str, entry_type: str, reference_id: str) -> bool:
@@ -90,9 +122,9 @@ def grant(
 ) -> CreditWallet:
     if credits <= 0:
         raise ServiceError("credit grant must be positive")
+    wallet = _lock_wallet(db, workspace_id)
     if reference_id and _ledger_exists(db, workspace_id, entry_type, reference_id):
-        return ensure_wallet(db, workspace_id)
-    wallet = ensure_wallet(db, workspace_id)
+        return wallet
     wallet.balance += credits
     _write_ledger(
         db,
@@ -121,10 +153,22 @@ def reserve(
 ) -> CreditWallet:
     if credits <= 0:
         return ensure_wallet(db, workspace_id)
+    with _workspace_mutex(workspace_id):
+        return _reserve_locked(db, workspace_id, job_id, credits, created_by, retry_count)
+
+
+def _reserve_locked(
+    db: Session,
+    workspace_id: str,
+    job_id: str,
+    credits: int,
+    created_by: str | None,
+    retry_count: int,
+) -> CreditWallet:
     reference_id = reservation_key(job_id, retry_count)
+    wallet = _lock_wallet(db, workspace_id)
     if _ledger_exists(db, workspace_id, "reserve", reference_id):
-        return ensure_wallet(db, workspace_id)
-    wallet = ensure_wallet(db, workspace_id)
+        return wallet
     if wallet.balance < credits:
         raise PaymentRequiredError(
             f"this video costs {credits} credits; workspace has {wallet.balance} available"
@@ -141,13 +185,22 @@ def reserve(
         reference_id=reference_id,
         created_by=created_by,
     )
+    log_event(
+        logger,
+        "credit_reserved",
+        workspace_id=workspace_id,
+        job_id=job_id,
+        credits=credits,
+        balance=wallet.balance,
+    )
     return wallet
 
 
 def capture(db: Session, workspace_id: str, job_id: str, retry_count: int = 0) -> CreditWallet:
     reference_id = reservation_key(job_id, retry_count)
+    wallet = _lock_wallet(db, workspace_id)
     if _ledger_exists(db, workspace_id, "capture", reference_id):
-        return ensure_wallet(db, workspace_id)
+        return wallet
     reserved_entry = db.scalar(
         select(CreditLedger).where(
             CreditLedger.workspace_id == workspace_id,
@@ -155,7 +208,6 @@ def capture(db: Session, workspace_id: str, job_id: str, retry_count: int = 0) -
             CreditLedger.reference_id == reference_id,
         )
     )
-    wallet = ensure_wallet(db, workspace_id)
     if reserved_entry is None:
         return wallet
     credits = abs(reserved_entry.amount)
@@ -169,6 +221,7 @@ def capture(db: Session, workspace_id: str, job_id: str, retry_count: int = 0) -
         reference_type="job",
         reference_id=reference_id,
     )
+    log_event(logger, "credit_captured", workspace_id=workspace_id, job_id=job_id, credits=credits)
     return wallet
 
 
@@ -180,10 +233,11 @@ def refund(
     retry_count: int = 0,
 ) -> CreditWallet:
     reference_id = reservation_key(job_id, retry_count)
+    wallet = _lock_wallet(db, workspace_id)
     if _ledger_exists(db, workspace_id, "refund", reference_id):
-        return ensure_wallet(db, workspace_id)
+        return wallet
     if _ledger_exists(db, workspace_id, "capture", reference_id):
-        return ensure_wallet(db, workspace_id)
+        return wallet
     reserved_entry = db.scalar(
         select(CreditLedger).where(
             CreditLedger.workspace_id == workspace_id,
@@ -191,7 +245,6 @@ def refund(
             CreditLedger.reference_id == reference_id,
         )
     )
-    wallet = ensure_wallet(db, workspace_id)
     if reserved_entry is None:
         return wallet
     credits = abs(reserved_entry.amount)
@@ -206,6 +259,7 @@ def refund(
         reference_type="job",
         reference_id=reference_id,
     )
+    log_event(logger, "credit_refunded", workspace_id=workspace_id, job_id=job_id, credits=credits)
     return wallet
 
 

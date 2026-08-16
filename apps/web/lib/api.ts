@@ -48,6 +48,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (response.status === 204) return undefined as T;
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && typeof window !== "undefined") {
+    setToken(null);
+    if (!window.location.pathname.startsWith("/login") && !window.location.pathname.startsWith("/register")) {
+      window.location.href = "/login";
+    }
+  }
   if (!response.ok) {
     const error: ApiError = new Error(
       typeof data.detail === "string" ? data.detail : "Request failed",
@@ -169,7 +175,13 @@ export const api = {
   estimate: (duration: number, resolution: string) =>
     request<{ credits: number }>(`/api/v1/billing/estimate?duration=${duration}&resolution=${resolution}`),
   checkout: (workspaceId: string, kind: "pack" | "plan", itemId: string) =>
-    request<{ provider: string; completed: boolean; checkout_url: string | null; message: string }>(
+    request<{
+      provider: string;
+      completed: boolean;
+      checkout_url: string | null;
+      session_id?: string | null;
+      message: string;
+    }>(
       "/api/v1/billing/checkout",
       {
         method: "POST",

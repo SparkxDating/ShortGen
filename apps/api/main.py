@@ -26,16 +26,21 @@ from apps.api.config import get_settings
 from apps.api.database.session import get_engine, init_db
 from apps.api.services.errors import ServiceError
 from shared.security.filenames import safe_object_key
-from shared.security.rate_limit import RateLimiter
+from shared.security import create_rate_limiter
 
 settings = get_settings()
 logger = logging.getLogger("saas.api")
-rate_limiter = RateLimiter(settings.rate_limit_per_minute)
+rate_limiter = create_rate_limiter(
+    settings.rate_limit_backend,
+    settings.rate_limit_per_minute,
+    settings.redis_url,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    init_db()
+    if settings.auto_create_schema:
+        init_db()
     from apps.api.database.session import SessionLocal
     from apps.api.services.billing_catalog import seed_billing_catalog
     from apps.api.services.template_service import seed_system_templates

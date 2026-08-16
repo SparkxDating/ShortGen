@@ -62,6 +62,11 @@ class Settings:
     razorpay_key_id: str
     razorpay_key_secret: str
     razorpay_webhook_secret: str
+    rate_limit_backend: str
+    job_stale_seconds: int
+    job_max_retries: int
+    signed_url_ttl: int
+    auto_create_schema: bool
 
     @property
     def is_production(self) -> bool:
@@ -70,6 +75,39 @@ class Settings:
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+
+_WEAK_SECRETS = {
+    "",
+    "dev-only-change-me",
+    "dev-only-change-me-please-use-32b",
+    "change-me-to-a-long-random-string",
+    "secret",
+    "changeme",
+    "jwt_secret",
+}
+
+
+def validate_settings(settings: Settings) -> None:
+    if not settings.is_production:
+        return
+    if settings.jwt_secret.strip().lower() in _WEAK_SECRETS or len(settings.jwt_secret) < 32:
+        raise RuntimeError("JWT_SECRET must be a strong secret of at least 32 characters in production")
+    if settings.jwt_algorithm.upper() != "HS256":
+        raise RuntimeError("JWT_ALGORITHM must be HS256 in production")
+    if not settings.cors_origins or any(origin == "*" for origin in settings.cors_origins):
+        raise RuntimeError("CORS_ORIGINS must be an explicit allow-list in production")
+    provider = settings.billing_provider.lower()
+    if provider in {"local", "dev", "test"}:
+        raise RuntimeError("BILLING_PROVIDER=local is not allowed in production")
+    if provider == "stripe":
+        if not settings.stripe_secret_key or not settings.stripe_webhook_secret:
+            raise RuntimeError("STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET are required in production")
+    if provider == "razorpay":
+        if not settings.razorpay_key_id or not settings.razorpay_key_secret or not settings.razorpay_webhook_secret:
+            raise RuntimeError(
+                "RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, and RAZORPAY_WEBHOOK_SECRET are required in production"
+            )
 
 
 @lru_cache(maxsize=1)
@@ -97,10 +135,19 @@ def get_settings() -> Settings:
     elif database_url.startswith("postgresql://") and "+psycopg" not in database_url:
         database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
-    return Settings(
+    redis_url = _env("REDIS_URL", "redis://localhost:6379/0")
+    rate_backend = _env("RATE_LIMIT_BACKEND")
+    if not rate_backend:
+        rate_backend = (
+            "redis"
+            if environment.lower() in {"prod", "production"} and redis_url and not redis_url.startswith("memory://")
+            else "memory"
+        )
+
+    settings = Settings(
         environment=environment,
         database_url=database_url,
-        redis_url=_env("REDIS_URL", "redis://localhost:6379/0"),
+        redis_url=redis_url,
         jwt_secret=jwt_secret,
         jwt_expire_minutes=_env_int("JWT_EXPIRE_MINUTES", 1440),
         jwt_algorithm=_env("JWT_ALGORITHM", "HS256"),
@@ -124,4 +171,14 @@ def get_settings() -> Settings:
         razorpay_key_id=_env("RAZORPAY_KEY_ID"),
         razorpay_key_secret=_env("RAZORPAY_KEY_SECRET"),
         razorpay_webhook_secret=_env("RAZORPAY_WEBHOOK_SECRET"),
+        rate_limit_backend=rate_backend,
+        job_stale_seconds=_env_int("JOB_STALE_SECONDS", 180),
+        job_max_retries=_env_int("JOB_MAX_RETRIES", 3),
+        signed_url_ttl=_env_int("SIGNED_URL_TTL", 3600),
+        auto_create_schema=_env_bool(
+            "AUTO_CREATE_SCHEMA",
+            default=environment.lower() not in {"prod", "production"},
+        ),
     )
+    validate_settings(settings)
+    return settings

@@ -103,13 +103,11 @@ class MoneyPrinterTurboGenerationAdapter:
         from app.services.task import generate_script
 
         script = generate_script(task_id, params)
-        if not script or (isinstance(script, str) and script.startswith("Error: ")):
-            raise GenerationError(
-                script.removeprefix("Error: ").strip()
-                if isinstance(script, str) and script.startswith("Error: ")
-                else "failed to generate video script"
-            )
-        return script
+        if script and not (isinstance(script, str) and script.startswith("Error: ")):
+            return script
+        from apps.api.services.local_script import write_script
+
+        return write_script(str(params.video_subject or ""), str(params.video_language or ""))
 
     def generate_voice(self, task_id: str, params, video_script: str):
         from app.services.task import generate_audio

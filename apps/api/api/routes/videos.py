@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
 from sqlalchemy.orm import Session
 
 from apps.api.api.deps import queue_from_app
@@ -27,8 +27,15 @@ def create_video(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> VideoResponse:
-    return video_service.create_video(db, queue_from_app(request), current_user.id, payload)
+    return video_service.create_video(
+        db,
+        queue_from_app(request),
+        current_user.id,
+        payload,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.get("/{video_id}", response_model=VideoResponse)

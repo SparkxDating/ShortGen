@@ -1,3 +1,4 @@
+from apps.api.models.outbox import IdempotencyKey, JobOutbox
 from apps.api.models.billing import (
     BillingEvent,
     CreditLedger,
@@ -36,4 +37,6 @@ __all__ = [
     "CreditLedger",
     "Subscription",
     "BillingEvent",
+    "JobOutbox",
+    "IdempotencyKey",
 ]

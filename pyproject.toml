@@ -53,6 +53,8 @@ saas = [
     "email-validator>=2.2.0",
     "httpx>=0.28.1",
     "boto3>=1.35.0",
+    "stripe>=11.0.0",
+    "razorpay>=1.4.2",
 ]
 
 [dependency-groups]

@@ -39,7 +39,7 @@ def authenticate_user(db: Session, email: str, password: str) -> TokenResponse:
 
 def issue_token(user: User) -> TokenResponse:
     settings = get_settings()
-    token = create_access_token(user.id, extra={"email": user.email})
+    token = create_access_token(user.id)
     return TokenResponse(
         access_token=token,
         expires_in=settings.jwt_expire_minutes * 60,

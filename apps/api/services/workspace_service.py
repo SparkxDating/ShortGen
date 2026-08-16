@@ -67,6 +67,17 @@ def create_workspace(db: Session, owner: User, name: str) -> Workspace:
     from apps.api.services import credit_service
 
     credit_service.provision_workspace(db, workspace.id, owner.id)
+    from apps.api.models.project import Project
+
+    db.add(
+        Project(
+            workspace_id=workspace.id,
+            name="My First Project",
+            description="Created automatically so you can generate a video right away.",
+            created_by=owner.id,
+        )
+    )
+    db.flush()
     return workspace
 
 

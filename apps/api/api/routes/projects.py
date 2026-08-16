@@ -17,6 +17,8 @@ def list_projects(
     db: Session = Depends(get_db),
 ) -> list[ProjectResponse]:
     projects = project_service.list_projects(db, current_user.id, workspace_id)
+    if workspace_id and not projects:
+        projects = [project_service.ensure_default_project(db, current_user.id, workspace_id)]
     return [ProjectResponse.model_validate(project) for project in projects]
 
 

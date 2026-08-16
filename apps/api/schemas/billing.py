@@ -69,6 +69,9 @@ class CheckoutResponse(ORMModel):
     provider: str
     completed: bool
     checkout_url: str | None = None
+    session_id: str | None = None
+    razorpay_key_id: str | None = None
+    amount_cents: int | None = None
     message: str
 
 

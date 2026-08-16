@@ -68,12 +68,10 @@ class S3StorageProvider:
         self.client.delete_object(Bucket=self.bucket, Key=safe_object_key(object_key))
 
     def get_public_url(self, object_key: str) -> str:
-        key = safe_object_key(object_key)
+        # Private buckets: never invent a permanent public URL.
         if self.public_base_url:
-            return f"{self.public_base_url}/{key}"
-        if self.endpoint_url:
-            return f"{self.endpoint_url}/{self.bucket}/{key}"
-        return f"https://{self.bucket}.s3.amazonaws.com/{key}"
+            return self.get_signed_url(object_key)
+        return self.get_signed_url(object_key)
 
     def get_signed_url(self, object_key: str, expires_seconds: int = 3600) -> str:
         return self.client.generate_presigned_url(

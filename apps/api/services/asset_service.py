@@ -28,6 +28,14 @@ ALLOWED_UPLOADS = {
     ".wav": "audio",
     ".m4a": "audio",
 }
+MAGIC = {
+    b"\xff\xd8\xff": ".jpg",
+    b"\x89PNG": ".png",
+    b"ID3": ".mp3",
+    b"RIFF": "riff",
+    b"\x1aE\xdf\xa3": ".webm",
+}
+
 CONTENT_TYPES = {
     ".mp4": "video/mp4",
     ".mov": "video/quicktime",
@@ -61,6 +69,37 @@ def get_asset(db: Session, asset_id: str, user_id: str) -> Asset:
     return asset
 
 
+def sniff_suffix(content: bytes, filename: str) -> str:
+    safe_name = safe_filename(filename)
+    declared = Path(safe_name).suffix.lower()
+    head = content[:16]
+    detected = declared
+    if head.startswith(b"\xff\xd8\xff"):
+        detected = ".jpg"
+    elif head.startswith(b"\x89PNG"):
+        detected = ".png"
+    elif head.startswith(b"ID3") or head[:2] == b"\xff\xfb":
+        detected = ".mp3"
+    elif head.startswith(b"RIFF") and b"WAVE" in content[:16]:
+        detected = ".wav"
+    elif head.startswith(b"RIFF") and b"WEBP" in content[:16]:
+        detected = ".webp"
+    elif b"ftyp" in content[:16]:
+        if b"qt" in content[:20]:
+            detected = ".mov"
+        elif b"M4A" in content[:20]:
+            detected = ".m4a"
+        else:
+            detected = ".mp4"
+    elif head.startswith(b"\x1aE\xdf\xa3"):
+        detected = ".webm" if declared != ".mkv" else ".mkv"
+    if detected not in ALLOWED_UPLOADS:
+        raise ServiceError("unsupported file type", status_code=400)
+    if declared and declared != detected and declared not in ALLOWED_UPLOADS:
+        raise ServiceError("unsupported file type", status_code=400)
+    return detected
+
+
 def create_asset(
     db: Session,
     storage: StorageProvider,
@@ -77,23 +116,26 @@ def create_asset(
     if not content:
         raise ServiceError("empty files are not allowed", status_code=400)
     safe_name = safe_filename(filename)
-    suffix = Path(safe_name).suffix.lower()
-    if suffix not in ALLOWED_UPLOADS or not is_allowed_upload(safe_name, set(ALLOWED_UPLOADS)):
+    suffix = sniff_suffix(content, safe_name)
+    if suffix not in ALLOWED_UPLOADS or not is_allowed_upload(safe_name if Path(safe_name).suffix else f"x{suffix}", set(ALLOWED_UPLOADS)):
         raise ServiceError("unsupported file type", status_code=400)
     kind = ALLOWED_UPLOADS[suffix]
-    key = f"workspaces/{workspace_id}/assets/{uuid4().hex}-{safe_name}"
+    key = f"workspaces/{workspace_id}/assets/{uuid4().hex}-{Path(safe_name).stem}{suffix}"
+    detected_type = CONTENT_TYPES.get(suffix, "application/octet-stream")
     upload_bytes = getattr(storage, "upload_bytes", None)
     if callable(upload_bytes):
-        stored = upload_bytes(content, key, content_type or CONTENT_TYPES.get(suffix))
+        stored = upload_bytes(content, key, detected_type)
     else:
         raise ServiceError("storage provider cannot accept uploads", status_code=500)
+    signer = getattr(storage, "get_signed_url", None)
+    public = signer(stored, settings.signed_url_ttl) if callable(signer) else storage.get_public_url(stored)
     asset = Asset(
         workspace_id=workspace_id,
         name=Path(safe_name).stem[:160] or "asset",
         kind=kind,
         object_key=stored,
-        public_url=storage.get_public_url(stored),
-        content_type=content_type or CONTENT_TYPES.get(suffix, "application/octet-stream"),
+        public_url=public,
+        content_type=detected_type,
         size_bytes=len(content),
         original_filename=safe_name,
         created_by=user_id,

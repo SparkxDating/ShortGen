@@ -23,6 +23,16 @@ def list_projects(db: Session, user_id: str, workspace_id: str | None = None) ->
     return list(db.scalars(query.order_by(Project.updated_at.desc())).all())
 
 
+def ensure_default_project(db: Session, user_id: str, workspace_id: str) -> Project:
+    workspace_service.require_membership(db, workspace_id, user_id, WorkspaceRole.editor)
+    existing = db.scalar(
+        select(Project).where(Project.workspace_id == workspace_id).order_by(Project.created_at.asc())
+    )
+    if existing:
+        return existing
+    return create_project(db, user_id, workspace_id, "My First Project", "Created automatically.")
+
+
 def get_project(db: Session, project_id: str, user_id: str) -> Project:
     project = db.get(Project, project_id)
     if project is None:

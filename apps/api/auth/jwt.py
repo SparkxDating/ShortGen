@@ -30,7 +30,12 @@ def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> st
 def decode_access_token(token: str) -> dict[str, Any]:
     settings = get_settings()
     try:
-        return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        return jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["exp", "sub"]},
+        )
     except jwt.ExpiredSignatureError as exc:
         raise TokenError("token expired") from exc
     except jwt.InvalidTokenError as exc:

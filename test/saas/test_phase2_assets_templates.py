@@ -60,6 +60,20 @@ def test_system_templates_and_workspace_template(client):
     assert any(item["name"] == "Brand short" for item in again.json())
 
 
+def test_local_scripts_differ_by_topic():
+    from apps.api.services.local_script import write_script
+
+    ocean = write_script("ocean facts")
+    pasta = write_script("how to make pasta")
+    black_holes = write_script("black hole facts")
+    assert "ocean" in ocean.lower()
+    assert "pasta" in pasta.lower()
+    assert "black hole" in black_holes.lower()
+    assert ocean != pasta
+    assert ocean != black_holes
+    assert pasta != black_holes
+
+
 def test_local_video_requires_assets(client):
     user = register(client, "localvid@example.com")
     headers = auth_header(user["access_token"])

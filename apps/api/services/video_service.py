@@ -11,10 +11,15 @@ from apps.api.models.video import Video, VideoStatus
 from apps.api.models.workspace import WorkspaceRole
 from apps.api.schemas.job import JobResponse
 from apps.api.schemas.video import VideoCreate, VideoResponse
-from apps.api.services import credit_service, workspace_service
+from apps.api.models.outbox import IdempotencyKey
+from apps.api.observability import log_event
+from apps.api.services import credit_service, outbox_service, workspace_service
 from apps.api.services.errors import NotFoundError, ServiceError
 from apps.api.services.job_service import latest_job_for_video
 from shared.queue.interface import JobQueue
+import logging
+
+logger = logging.getLogger("saas.videos")
 from video_engine.stages import stage_progress
 
 
@@ -59,11 +64,28 @@ def get_video(db: Session, video_id: str, user_id: str) -> VideoResponse:
     return _to_response(video, latest_job_for_video(db, video.id))
 
 
-def create_video(db: Session, queue: JobQueue, user_id: str, payload: VideoCreate) -> VideoResponse:
+def create_video(
+    db: Session,
+    queue: JobQueue,
+    user_id: str,
+    payload: VideoCreate,
+    idempotency_key: str | None = None,
+) -> VideoResponse:
     project = db.get(Project, payload.project_id)
     if project is None or project.workspace_id != payload.workspace_id:
         raise NotFoundError("project not found")
     workspace_service.require_membership(db, payload.workspace_id, user_id, WorkspaceRole.editor)
+
+    if idempotency_key:
+        existing = db.scalar(
+            select(IdempotencyKey).where(
+                IdempotencyKey.user_id == user_id,
+                IdempotencyKey.workspace_id == payload.workspace_id,
+                IdempotencyKey.key == idempotency_key.strip(),
+            )
+        )
+        if existing:
+            return get_video(db, existing.video_id, user_id)
 
     if payload.template_id:
         template = db.get(Template, payload.template_id)
@@ -138,10 +160,30 @@ def create_video(db: Session, queue: JobQueue, user_id: str, payload: VideoCreat
     except Exception:
         db.rollback()
         raise
-    queue.enqueue_job(job.id, input_data)
+    outbox_service.enqueue_pending(db, job.id, input_data)
+    if idempotency_key:
+        db.add(
+            IdempotencyKey(
+                user_id=user_id,
+                workspace_id=payload.workspace_id,
+                key=idempotency_key.strip()[:120],
+                video_id=video.id,
+            )
+        )
     db.commit()
+    try:
+        outbox_service.dispatch(db, queue, job.id)
+    except Exception:
+        logger.warning("queue dispatch deferred job_id=%s", job.id)
     db.refresh(video)
     db.refresh(job)
+    log_event(
+        logger,
+        "job_created",
+        job_id=job.id,
+        workspace_id=payload.workspace_id,
+        video_id=video.id,
+    )
     return _to_response(video, job)
 
 

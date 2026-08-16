@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from apps.api.models.job import Job, JobStatus
 from apps.api.models.video import Video, VideoStatus
 from apps.api.models.workspace import WorkspaceRole
-from apps.api.services import credit_service, workspace_service
+from apps.api.services import credit_service, outbox_service, workspace_service
 from apps.api.services.errors import NotFoundError, ServiceError
 from shared.queue.interface import JobQueue
 from video_engine.stages import stage_progress
@@ -72,8 +72,21 @@ def retry_job(db: Session, queue: JobQueue, job_id: str, user_id: str) -> Job:
     if video:
         video.status = VideoStatus.queued.value
         video.progress = 0
-    queue.retry_job(job.id, job.input_data or {})
+    from apps.api.models.outbox import JobOutbox
+    from sqlalchemy import select as sql_select
+
+    existing = db.scalar(sql_select(JobOutbox).where(JobOutbox.job_id == job.id))
+    if existing:
+        existing.status = "pending"
+        existing.sent_at = None
+        existing.payload = job.input_data or {}
+    else:
+        outbox_service.enqueue_pending(db, job.id, job.input_data or {})
     db.commit()
+    try:
+        outbox_service.dispatch(db, queue, job.id)
+    except Exception:
+        pass
     db.refresh(job)
     return job
 

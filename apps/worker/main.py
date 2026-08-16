@@ -42,15 +42,29 @@ def _stop(*_: object) -> None:
 
 def main() -> None:
     settings = get_settings()
-    init_db()
+    if settings.auto_create_schema:
+        init_db()
     queue = get_queue()
     storage = get_storage()
     signal.signal(signal.SIGINT, _stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _stop)
     logger.info("worker started redis=%s storage=%s", settings.redis_url, settings.storage_provider)
+    idle_ticks = 0
     while _running:
+        db = SessionLocal()
+        try:
+            if idle_ticks % 6 == 0:
+                from apps.api.services import job_recovery, outbox_service
+
+                outbox_service.dispatch(db, queue)
+                job_recovery.recover_stale_jobs(db, queue)
+        except Exception:
+            logger.exception("worker maintenance failed")
+        finally:
+            db.close()
         job = queue.dequeue_job(timeout_seconds=5)
+        idle_ticks += 1
         if job is None:
             continue
         db = SessionLocal()

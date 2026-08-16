@@ -65,11 +65,12 @@ class StripeBillingProvider:
 
     def parse_webhook(self, payload: bytes, headers: dict[str, str]) -> WebhookResult:
         signature = headers.get("stripe-signature") or headers.get("Stripe-Signature") or ""
-        if self.webhook_secret:
-            event = self._stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
-            data = event
-        else:
-            data = json.loads(payload.decode("utf-8"))
+        if not self.webhook_secret:
+            raise RuntimeError("STRIPE_WEBHOOK_SECRET is required to verify Stripe webhooks")
+        if not signature:
+            raise RuntimeError("missing Stripe-Signature header")
+        event = self._stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
+        data = event
         event_type = data.get("type") if isinstance(data, dict) else data["type"]
         obj: dict[str, Any]
         if isinstance(data, dict):

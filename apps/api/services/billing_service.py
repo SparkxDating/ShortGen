@@ -100,12 +100,18 @@ def checkout(
         product_name=name,
     )
     if session.completed:
+        if provider.name != "local":
+            raise ServiceError("only the local billing provider may grant credits without a webhook")
         _fulfill(db, workspace_id, kind, resolved_id, user_id, provider.name, session.session_id or "local")
         db.commit()
+    settings = get_settings()
     return CheckoutResponse(
         provider=session.provider,
         completed=session.completed,
         checkout_url=session.checkout_url,
+        session_id=session.session_id,
+        razorpay_key_id=settings.razorpay_key_id if session.provider == "razorpay" else None,
+        amount_cents=amount,
         message=session.message,
     )
 
@@ -166,12 +172,30 @@ def _fulfill(
     )
 
 
+_PAID_EVENTS = {
+    "checkout.session.completed",
+    "payment_intent.succeeded",
+    "order.paid",
+    "payment.captured",
+}
+
+
 def handle_webhook(db: Session, provider_name: str, payload: bytes, headers: dict[str, str]) -> dict[str, str]:
+    from apps.api.observability import log_event
+    import logging
+
+    logger = logging.getLogger("saas.billing")
     provider = get_provider()
     if provider.name != provider_name:
         raise ServiceError("webhook provider does not match BILLING_PROVIDER")
-    result = provider.parse_webhook(payload, headers)
-    if result.workspace_id and result.kind and result.item_id:
+    try:
+        result = provider.parse_webhook(payload, headers)
+    except Exception:
+        logger.warning("billing webhook verification failed provider=%s", provider_name)
+        raise ServiceError("invalid billing webhook", status_code=400)
+    log_event(logger, "billing_webhook", provider=provider_name, event_type=result.event_type)
+    paid = result.event_type in _PAID_EVENTS or result.event_type.endswith(".purchased")
+    if paid and result.workspace_id and result.kind and result.item_id:
         _fulfill(
             db,
             result.workspace_id,

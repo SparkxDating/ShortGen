@@ -65,14 +65,32 @@ def main() -> None:
             db.close()
         job = queue.dequeue_job(timeout_seconds=5)
         idle_ticks += 1
-        if job is None:
+        job_id = job.job_id if job else None
+        if job_id is None:
+            db = SessionLocal()
+            try:
+                from sqlalchemy import select
+                from apps.api.models.job import Job, JobStatus
+
+                queued = db.scalar(
+                    select(Job.id)
+                    .where(Job.status == JobStatus.QUEUED.value)
+                    .order_by(Job.created_at.asc())
+                    .limit(1)
+                )
+                job_id = queued
+                if job_id:
+                    logger.info("claimed queued job from database job_id=%s", job_id)
+            finally:
+                db.close()
+        if not job_id:
             continue
         db = SessionLocal()
         try:
             runner = JobRunner(db, queue, storage)
-            runner.process_job(job.job_id)
+            runner.process_job(job_id)
         except Exception:
-            logger.exception("failed to process job %s", job.job_id)
+            logger.exception("failed to process job %s", job_id)
         finally:
             db.close()
     logger.info("worker stopped")

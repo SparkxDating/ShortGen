@@ -228,11 +228,23 @@ function CreateForm() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="topic">Topic</Label>
-              <Input id="topic" name="topic" required placeholder="Why the ocean is blue" />
+              <Input
+                id="topic"
+                name="topic"
+                required
+                placeholder="Why the ocean is blue"
+                defaultValue={search.get("topic") || ""}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="title">Title</Label>
-              <Input id="title" name="title" required placeholder="Ocean facts" />
+              <Input
+                id="title"
+                name="title"
+                required
+                placeholder="Ocean facts"
+                defaultValue={search.get("topic") || ""}
+              />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">

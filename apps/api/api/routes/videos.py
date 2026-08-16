@@ -6,7 +6,7 @@ from apps.api.auth.dependencies import get_current_user
 from apps.api.database.session import get_db
 from apps.api.models.user import User
 from apps.api.schemas.video import VideoCreate, VideoResponse
-from apps.api.services import video_service
+from apps.api.services import publish_service, video_service
 
 router = APIRouter()
 
@@ -45,6 +45,15 @@ def get_video(
     db: Session = Depends(get_db),
 ) -> VideoResponse:
     return video_service.get_video(db, video_id, current_user.id)
+
+
+@router.post("/{video_id}/publish")
+def publish_video(
+    video_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    return publish_service.publish_video(db, video_id, current_user.id)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)

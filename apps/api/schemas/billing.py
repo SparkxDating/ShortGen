@@ -79,3 +79,11 @@ class DevGrantRequest(ORMModel):
     workspace_id: str
     credits: int = Field(gt=0, le=100000)
     description: str = "Development credit grant"
+
+
+class BillingStatusResponse(ORMModel):
+    provider: str
+    live_ready: bool
+    webhook_configured: bool
+    environment: str
+    message: str

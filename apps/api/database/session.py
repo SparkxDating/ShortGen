@@ -55,10 +55,37 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def _ensure_sqlite_columns(engine: Engine) -> None:
+    """Add columns create_all will not add on an existing local SQLite file."""
+    settings = get_settings()
+    if not settings.is_sqlite:
+        return
+    patches = {
+        "jobs": (
+            ("heartbeat_at", "DATETIME"),
+            ("worker_id", "VARCHAR(80)"),
+            ("attempt_started_at", "DATETIME"),
+        ),
+    }
+    with engine.begin() as connection:
+        for table, columns in patches.items():
+            existing = {
+                row[1]
+                for row in connection.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not existing:
+                continue
+            for name, ddl in columns:
+                if name not in existing:
+                    connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
 def init_db() -> None:
     from apps.api import models  # noqa: F401
 
-    Base.metadata.create_all(bind=get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
+    _ensure_sqlite_columns(engine)
 
 
 # Backwards-friendly aliases used by the worker and health checks.

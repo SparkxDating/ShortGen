@@ -6,6 +6,7 @@ from apps.api.config import get_settings
 from apps.api.database.session import get_db
 from apps.api.models.user import User
 from apps.api.schemas.billing import (
+    BillingStatusResponse,
     CheckoutRequest,
     CheckoutResponse,
     CreditPackResponse,
@@ -18,6 +19,32 @@ from apps.api.schemas.billing import (
 from apps.api.services import billing_service, credit_service, workspace_service
 
 router = APIRouter()
+
+
+@router.get("/status", response_model=BillingStatusResponse)
+def billing_status() -> BillingStatusResponse:
+    settings = get_settings()
+    provider = settings.billing_provider
+    webhook = bool(
+        (provider == "stripe" and settings.stripe_webhook_secret)
+        or (provider == "razorpay" and settings.razorpay_webhook_secret)
+    )
+    live_ready = provider in {"stripe", "razorpay"} and webhook and bool(
+        settings.stripe_secret_key if provider == "stripe" else settings.razorpay_key_secret
+    )
+    if provider == "local":
+        message = "Local billing is active. Credits are granted without a card network."
+    elif live_ready:
+        message = f"{provider} is live. Credits are added only after a verified webhook."
+    else:
+        message = f"{provider} is selected but keys or webhook secret are missing."
+    return BillingStatusResponse(
+        provider=provider,
+        live_ready=live_ready,
+        webhook_configured=webhook,
+        environment=settings.environment,
+        message=message,
+    )
 
 
 @router.get("/plans", response_model=list[PlanResponse])

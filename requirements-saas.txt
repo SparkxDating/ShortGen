@@ -11,3 +11,11 @@ httpx>=0.28.1
 boto3>=1.35.0
 stripe>=11.0.0
 razorpay>=1.4.2
+moviepy==2.2.1
+edge-tts==7.2.7
+imageio-ffmpeg
+pillow
+toml>=0.10.2
+openai==2.24.0
+pydub==0.25.1
+pyyaml==6.0.3

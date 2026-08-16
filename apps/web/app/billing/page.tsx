@@ -23,21 +23,28 @@ export default function BillingPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [packs, setPacks] = useState<CreditPack[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [providerStatus, setProviderStatus] = useState<{
+    provider: string;
+    live_ready: boolean;
+    message: string;
+  } | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
   async function refresh() {
     if (!workspace) return;
-    const [nextUsage, nextPlans, nextPacks, nextLedger] = await Promise.all([
+    const [nextUsage, nextPlans, nextPacks, nextLedger, nextStatus] = await Promise.all([
       api.usage(workspace.id),
       api.plans(),
       api.packs(),
       api.ledger(workspace.id),
+      api.billingStatus(),
     ]);
     setUsage(nextUsage);
     setPlans(nextPlans);
     setPacks(nextPacks);
     setLedger(nextLedger);
+    setProviderStatus(nextStatus);
   }
 
   useEffect(() => {
@@ -73,9 +80,15 @@ export default function BillingPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Credits are workspace-scoped. Local mode completes purchases without Stripe or Razorpay.
+          Credits are workspace-scoped. Live Stripe or Razorpay only grant credits after a verified webhook.
         </p>
       </div>
+      {providerStatus ? (
+        <p className="mb-4 text-sm text-muted-foreground">
+          Provider: <span className="font-medium text-foreground">{providerStatus.provider}</span>
+          {providerStatus.live_ready ? " · live" : " · not live"} — {providerStatus.message}
+        </p>
+      ) : null}
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
       <div className="grid gap-6 lg:grid-cols-3">

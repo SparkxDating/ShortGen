@@ -16,6 +16,7 @@ export default function VideoDetailPage() {
   const [video, setVideo] = useState<Video | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [publishNote, setPublishNote] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +48,27 @@ export default function VideoDetailPage() {
       setVideo(await api.video(params.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not cancel");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function publish() {
+    setBusy(true);
+    setPublishNote("");
+    try {
+      const result = await api.publishVideo(params.id);
+      if (result.success) {
+        setPublishNote(`Published to ${(result.platforms || []).join(", ") || "configured platforms"}.`);
+      } else if (!result.configured) {
+        setPublishNote(
+          "Social publish is initiated but Upload-Post is not configured. Add upload_post_api_key in config.toml.",
+        );
+      } else {
+        setError(result.error || "Publish failed");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not publish");
     } finally {
       setBusy(false);
     }
@@ -110,9 +132,15 @@ export default function VideoDetailPage() {
             {job?.status === "COMPLETED" && media ? (
               <div className="space-y-4">
                 <video className="w-full rounded-lg border border-border" src={media} controls />
-                <a href={media} download>
-                  <Button variant="secondary">Download</Button>
-                </a>
+                <div className="flex gap-2">
+                  <a href={media} download>
+                    <Button variant="secondary">Download</Button>
+                  </a>
+                  <Button variant="outline" disabled={busy} onClick={publish}>
+                    Publish
+                  </Button>
+                </div>
+                {publishNote ? <p className="text-sm text-muted-foreground">{publishNote}</p> : null}
               </div>
             ) : null}
           </CardContent>

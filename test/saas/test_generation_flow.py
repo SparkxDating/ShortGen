@@ -191,3 +191,44 @@ def test_adapter_calls_existing_task_functions(monkeypatch):
         "get_video_materials",
         "generate_final_videos",
     ]
+
+
+def test_adapter_falls_back_to_local_terms_when_llm_missing(monkeypatch):
+    import sys
+    import types
+
+    from video_engine.generation_adapter import MoneyPrinterTurboGenerationAdapter
+
+    class Params:
+        video_source = "pexels"
+        video_subject = "ocean facts"
+        video_language = "en-US"
+        voice_name = "en-US-JennyNeural-Female"
+        video_clip_duration = 5
+        paragraph_number = 1
+        subtitle_enabled = True
+        video_script = ""
+
+    fake_task = types.ModuleType("app.services.task")
+    fake_task.generate_terms = lambda *args, **kwargs: []
+    fake_task.save_script_data = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "app.services.task", fake_task)
+    monkeypatch.setattr(MoneyPrinterTurboGenerationAdapter, "build_params", lambda self, payload: Params())
+    monkeypatch.setattr(MoneyPrinterTurboGenerationAdapter, "_ensure_engine", lambda self: None)
+    monkeypatch.setattr(MoneyPrinterTurboGenerationAdapter, "generate_script", lambda self, task_id, params: "script")
+    monkeypatch.setattr(
+        MoneyPrinterTurboGenerationAdapter,
+        "generate_voice",
+        lambda self, task_id, params, script: ("/tmp/audio.mp3", 8, object()),
+    )
+    monkeypatch.setattr(MoneyPrinterTurboGenerationAdapter, "generate_subtitles", lambda self, *args, **kwargs: "")
+    monkeypatch.setattr(MoneyPrinterTurboGenerationAdapter, "fetch_media", lambda self, *args, **kwargs: ["/tmp/clip.mp4"])
+    monkeypatch.setattr(
+        MoneyPrinterTurboGenerationAdapter,
+        "render_video",
+        lambda self, *args, **kwargs: (["/tmp/final.mp4"], [], []),
+    )
+
+    result = MoneyPrinterTurboGenerationAdapter().create_video({"topic": "ocean facts"})
+    assert "ocean" in result.terms
+    assert result.primary_video_path == "/tmp/final.mp4"

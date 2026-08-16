@@ -144,6 +144,59 @@ def test_local_pack_purchase_adds_credits(client):
     assert after == before + pack["credits"]
 
 
+def test_billing_status_reports_local_provider(client):
+    user = register(client, "status@example.com")
+    headers = auth_header(user["access_token"])
+    status = client.get("/api/v1/billing/status", headers=headers)
+    assert status.status_code == 200
+    body = status.json()
+    assert body["provider"] == "local"
+    assert body["live_ready"] is False
+    assert "Local billing" in body["message"]
+
+
+def test_director_plan_uses_existing_script_path(client):
+    user = register(client, "director@example.com")
+    headers = auth_header(user["access_token"])
+    workspace = _workspace(client, headers)
+    providers = client.get("/api/v1/director/providers", headers=headers)
+    assert providers.status_code == 200
+    ids = {item["id"] for item in providers.json()}
+    assert "moneyprinterturbo" in ids
+    assert "runway" in ids
+    planned = client.post(
+        "/api/v1/director/plan",
+        json={"workspace_id": workspace["id"], "topic": "Ocean facts", "video_language": "en-US"},
+        headers=headers,
+    )
+    assert planned.status_code == 200, planned.text
+    assert "Ocean facts" in planned.json()["plan"]
+    assert planned.json()["renderer"] == "moneyprinterturbo"
+
+
+def test_publish_rejects_unfinished_video(client):
+    user = register(client, "publish@example.com")
+    headers = auth_header(user["access_token"])
+    workspace = _workspace(client, headers)
+    project = client.post(
+        "/api/v1/projects",
+        json={"workspace_id": workspace["id"], "name": "Pub", "description": ""},
+        headers=headers,
+    ).json()
+    video = client.post(
+        "/api/v1/videos",
+        json={
+            "workspace_id": workspace["id"],
+            "project_id": project["id"],
+            "title": "Not ready",
+            "topic": "Not ready",
+        },
+        headers=headers,
+    ).json()
+    published = client.post(f"/api/v1/videos/{video['id']}/publish", headers=headers)
+    assert published.status_code == 400
+
+
 def test_viewer_cannot_checkout(client):
     owner = register(client, "bill-owner@example.com")
     owner_headers = auth_header(owner["access_token"])

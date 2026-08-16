@@ -4,6 +4,7 @@ from apps.api.api.routes import (
     assets,
     auth,
     billing,
+    director,
     jobs,
     members,
     projects,
@@ -26,3 +27,4 @@ api_router.include_router(assets.router, prefix="/assets", tags=["assets"])
 api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 api_router.include_router(scripts.router, prefix="/scripts", tags=["scripts"])
 api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
+api_router.include_router(director.router, prefix="/director", tags=["director"])

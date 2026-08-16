@@ -188,6 +188,34 @@ export const api = {
         body: JSON.stringify({ workspace_id: workspaceId, kind, item_id: itemId }),
       },
     ),
+  billingStatus: () =>
+    request<{
+      provider: string;
+      live_ready: boolean;
+      webhook_configured: boolean;
+      environment: string;
+      message: string;
+    }>("/api/v1/billing/status"),
+  directorProviders: () =>
+    request<Array<{ id: string; label: string; status: string; notes?: string }>>(
+      "/api/v1/director/providers",
+    ),
+  directorPlan: (payload: { workspace_id: string; topic: string; video_language: string }) =>
+    request<{ topic: string; script: string; plan: string; renderer: string }>(
+      "/api/v1/director/plan",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+  publishVideo: (id: string) =>
+    request<{
+      video_id: string;
+      success: boolean;
+      configured: boolean;
+      platforms: string[];
+      error?: string | null;
+    }>(`/api/v1/videos/${id}/publish`, { method: "POST" }),
 };
 
 export function resolveMediaUrl(url: string | null | undefined): string | null {

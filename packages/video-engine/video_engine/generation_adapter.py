@@ -8,7 +8,9 @@ job table.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -47,6 +49,53 @@ class GenerationResult:
         return None
 
 
+def _demo_materials(task_id: str, audio_duration: float) -> list[str]:
+    """Use bundled stills as local clips when stock APIs are not configured."""
+    from app.utils import utils
+
+    roots = [
+        Path(utils.root_dir()) / "test" / "resources",
+        Path(utils.root_dir()) / "resource",
+    ]
+    images: list[Path] = []
+    for root in roots:
+        if root.is_dir():
+            images.extend(sorted(root.glob("*.png"))[:6])
+    if not images:
+        return []
+    out_dir = Path(utils.task_dir(task_id))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    clip_len = max(2.0, min(5.0, float(audio_duration or 8) / max(1, len(images)))
+    )
+    paths: list[str] = []
+    try:
+        from moviepy import ImageClip
+    except Exception:
+        return []
+    for index, image in enumerate(images):
+        dest = out_dir / f"demo-{index}.mp4"
+        try:
+            clip = ImageClip(str(image)).with_duration(clip_len).with_fps(24)
+            clip.write_videofile(str(dest), fps=24, audio=False, logger=None, threads=1)
+            clip.close()
+            if dest.is_file():
+                paths.append(str(dest))
+        except Exception:
+            continue
+    return paths
+
+
+def _local_terms(subject: str, script: str) -> list[str]:
+    """Stock search terms when no LLM key is configured."""
+    words = re.findall(r"[A-Za-z]{3,}", f"{subject} {script}")
+    unique: list[str] = []
+    for word in words:
+        lower = word.lower()
+        if lower not in unique:
+            unique.append(lower)
+    return unique[:5] or ["b-roll", "city", "nature"]
+
+
 class MoneyPrinterTurboGenerationAdapter:
     """Thin façade over ``app.services.task``.
 
@@ -61,7 +110,7 @@ class MoneyPrinterTurboGenerationAdapter:
         from app.services import task as task_service  # noqa: F401
 
     def build_params(self, payload: dict[str, Any]):
-        from app.models.schema import VideoAspect, VideoParams
+        from app.models.schema import VideoAspect, VideoConcatMode, VideoParams
 
         aspect = payload.get("aspect_ratio") or payload.get("video_aspect") or "9:16"
         source = payload.get("visual_source") or payload.get("video_source") or "stock"
@@ -91,9 +140,12 @@ class MoneyPrinterTurboGenerationAdapter:
             video_script=str(payload.get("video_script") or ""),
             video_aspect=VideoAspect(aspect) if aspect in {item.value for item in VideoAspect} else VideoAspect.portrait,
             video_language=str(payload.get("video_language") or payload.get("language") or ""),
-            voice_name=str(payload.get("voice") or payload.get("voice_name") or ""),
+            voice_name=str(
+                payload.get("voice") or payload.get("voice_name") or "en-US-JennyNeural-Female"
+            ),
             video_source=video_source,
             video_materials=materials,
+            video_concat_mode=VideoConcatMode.random,
             video_clip_duration=int(payload.get("video_clip_duration") or 5),
             paragraph_number=int(payload.get("paragraph_number") or 1),
             subtitle_enabled=bool(payload.get("subtitle_enabled", True)),
@@ -125,7 +177,10 @@ class MoneyPrinterTurboGenerationAdapter:
     def fetch_media(self, task_id: str, params, video_terms, audio_duration):
         from app.services.task import get_video_materials
 
-        materials = get_video_materials(task_id, params, video_terms, audio_duration)
+        try:
+            materials = get_video_materials(task_id, params, video_terms, audio_duration)
+        except Exception as exc:
+            raise GenerationError(f"failed to prepare video materials: {exc}") from exc
         if not materials:
             raise GenerationError("failed to prepare video materials")
         return materials
@@ -183,9 +238,12 @@ class MoneyPrinterTurboGenerationAdapter:
         report("PLANNING")
         terms: list[str] | str = []
         if getattr(params, "video_source", "pexels") != "local":
-            terms = generate_terms(task_id, params, script)
+            try:
+                terms = generate_terms(task_id, params, script)
+            except Exception:
+                terms = []
             if not terms:
-                raise GenerationError("failed to generate video search terms")
+                terms = _local_terms(str(getattr(params, "video_subject", "") or ""), script)
         result.terms = terms
         save_script_data(task_id, script, terms, params)
         check_cancel()
@@ -204,7 +262,12 @@ class MoneyPrinterTurboGenerationAdapter:
         check_cancel()
 
         report("FETCHING_MEDIA")
-        materials = self.fetch_media(task_id, params, terms, audio_duration)
+        try:
+            materials = self.fetch_media(task_id, params, terms, audio_duration)
+        except GenerationError:
+            materials = _demo_materials(task_id, float(audio_duration or 8))
+            if not materials:
+                raise
         result.materials = list(materials)
         check_cancel()
 

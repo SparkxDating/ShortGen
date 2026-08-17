@@ -39,6 +39,7 @@ test_*.py
 saas.db
 .env
 .env.local
+docker-compose.saas.local.yml
 apps/web/.env.local
 apps/web/.next
 apps/web/node_modules

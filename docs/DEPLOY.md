@@ -24,6 +24,8 @@ docker compose -f docker-compose.saas.yml up --build -d
 
 Services: Postgres, Redis, API `:8000`, worker, web `:3000`.
 
+Postgres and Redis stay on the compose network only, so they do not steal host ports `5432` / `6379`. To publish the API/web on other host ports, add a local compose override.
+
 Production:
 
 ```

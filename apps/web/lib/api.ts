@@ -23,7 +23,11 @@ export function getApiBase(): string {
   if (host === "localhost" || host === "127.0.0.1") {
     return "http://127.0.0.1:8000";
   }
-  // Public tunnels and Vercel: same-origin. Next rewrites /api and /storage to the API.
+  // Vercel cannot reach this PC's localhost. Talk to the public API host.
+  if (host.endsWith(".vercel.app")) {
+    return configured;
+  }
+  // Tunnels that terminate on this PC: same-origin, Next rewrites /api and /storage.
   return "";
 }
 
@@ -207,14 +211,45 @@ export const api = {
     request<Array<{ id: string; label: string; status: string; notes?: string }>>(
       "/api/v1/director/providers",
     ),
-  directorPlan: (payload: { workspace_id: string; topic: string; video_language: string }) =>
-    request<{ topic: string; script: string; plan: string; renderer: string }>(
-      "/api/v1/director/plan",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
+  directorPlan: (payload: Record<string, unknown>) =>
+    request<{
+      topic: string;
+      script: string;
+      plan: string;
+      renderer: string;
+      video_plan: {
+        title: string;
+        duration: number;
+        aspect_ratio: string;
+        visual_mode: string;
+        scenes: Array<{
+          id: string;
+          order: number;
+          duration: number;
+          narration: string;
+          visual_type: string;
+          visual_prompt: string;
+          visual_query: string;
+        }>;
+      };
+      video_id?: string | null;
+    }>("/api/v1/director/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  aiCapabilities: () =>
+    request<{
+      ai_video: boolean;
+      ai_image: boolean;
+      message: string;
+      providers: Array<{ name: string; kind: string; models: string[]; aspect_ratios: string[]; durations: number[] }>;
+    }>("/api/v1/ai/capabilities"),
+  videoScenes: (id: string) => request<Array<Record<string, unknown>>>(`/api/v1/videos/${id}/scenes`),
+  patchScene: (videoId: string, sceneId: string, payload: Record<string, unknown>) =>
+    request(`/api/v1/videos/${videoId}/scenes/${sceneId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  regenerateScene: (videoId: string, sceneId: string) =>
+    request(`/api/v1/videos/${videoId}/scenes/${sceneId}/regenerate`, { method: "POST" }),
+  generateVideo: (id: string) => request(`/api/v1/videos/${id}/generate`, { method: "POST" }),
   providerKeys: () =>
     request<{
       llm_provider: string;

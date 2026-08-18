@@ -67,6 +67,18 @@ class Settings:
     job_max_retries: int
     signed_url_ttl: int
     auto_create_schema: bool
+    ai_video_enabled: bool
+    ai_video_provider: str
+    ai_video_api_key: str
+    ai_video_model: str
+    ai_video_base_credits: int
+    max_parallel_scene_generations: int
+    ai_video_poll_initial_seconds: int
+    ai_video_poll_max_seconds: int
+    ai_video_max_wait_seconds: int
+    ai_video_fallback_policy: str
+    ai_image_provider: str
+    ai_image_api_key: str
 
     @property
     def is_production(self) -> bool:
@@ -179,6 +191,18 @@ def get_settings() -> Settings:
             "AUTO_CREATE_SCHEMA",
             default=environment.lower() not in {"prod", "production"},
         ),
+        ai_video_enabled=_env_bool("AI_VIDEO_ENABLED", True),
+        ai_video_provider=_env("AI_VIDEO_PROVIDER", "replicate"),
+        ai_video_api_key=_env("AI_VIDEO_API_KEY") or _env("REPLICATE_API_TOKEN"),
+        ai_video_model=_env("AI_VIDEO_MODEL", "luma/ray-flash-2-720p"),
+        ai_video_base_credits=_env_int("AI_VIDEO_BASE_CREDITS", 20),
+        max_parallel_scene_generations=_env_int("MAX_PARALLEL_SCENE_GENERATIONS", 2),
+        ai_video_poll_initial_seconds=_env_int("AI_VIDEO_POLL_INITIAL_SECONDS", 10),
+        ai_video_poll_max_seconds=_env_int("AI_VIDEO_POLL_MAX_SECONDS", 60),
+        ai_video_max_wait_seconds=_env_int("AI_VIDEO_MAX_WAIT_SECONDS", 900),
+        ai_video_fallback_policy=_env("AI_VIDEO_FALLBACK_POLICY", "ai_image,stock"),
+        ai_image_provider=_env("AI_IMAGE_PROVIDER", "replicate"),
+        ai_image_api_key=_env("AI_IMAGE_API_KEY"),
     )
     validate_settings(settings)
     return settings

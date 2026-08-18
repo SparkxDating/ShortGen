@@ -9,6 +9,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from apps.api.bootstrap import ensure_sys_path
+
+ensure_sys_path()
 
 pytest.importorskip("sqlalchemy")
 pytest.importorskip("jwt")

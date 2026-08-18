@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import JSON
 
 from apps.api.database.base import Base
 
@@ -38,6 +39,8 @@ class Video(Base):
     thumbnail_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     video_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    visual_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="stock")
+    plan_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -46,3 +49,4 @@ class Video(Base):
     workspace = relationship("Workspace", back_populates="videos")
     project = relationship("Project", back_populates="videos")
     jobs = relationship("Job", back_populates="video", cascade="all, delete-orphan")
+    scenes = relationship("VideoScene", back_populates="video", cascade="all, delete-orphan")

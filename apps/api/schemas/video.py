@@ -27,6 +27,11 @@ class VideoCreate(ORMModel):
     video_concat_mode: Literal["sequential", "random"] = "sequential"
     asset_ids: list[str] = Field(default_factory=list)
     template_id: str | None = None
+    visual_mode: Literal["auto", "stock", "ai_video", "mixed"] = "stock"
+    style: str = Field(default="cinematic", max_length=80)
+    tone: str = Field(default="informative", max_length=80)
+    target_platform: str = Field(default="short", max_length=40)
+    director_plan: dict | None = None
 
 
 class VideoResponse(ORMModel):
@@ -45,3 +50,4 @@ class VideoResponse(ORMModel):
     created_at: datetime
     updated_at: datetime | None = None
     latest_job: JobResponse | None = None
+    visual_mode: str = "stock"

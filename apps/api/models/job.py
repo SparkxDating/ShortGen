@@ -21,6 +21,8 @@ class JobStatus(str, enum.Enum):
 
 class JobType(str, enum.Enum):
     generate_video = "generate_video"
+    generate_scene = "generate_scene"
+    render_video = "render_video"
 
 
 class Job(Base):

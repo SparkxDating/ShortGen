@@ -96,7 +96,27 @@ class JobRunner:
 
         try:
             payload = dict(job.input_data or {})
+            if job.job_type == "generate_scene":
+                return self._process_scene(job, video)
+            if job.job_type == "render_video":
+                payload["visual_mode"] = payload.get("visual_mode") or "auto"
             payload.update(self._material_payload(job, payload))
+            if self._uses_director(payload, video):
+                from apps.api.bootstrap import REPO_ROOT
+                from apps.worker.director_runner import prepare_local_materials
+
+                work_dir = REPO_ROOT / "storage" / "saas-work" / job.id
+                clips = prepare_local_materials(
+                    self.db,
+                    job,
+                    video,
+                    work_dir,
+                    on_progress,
+                    lambda: self.queue.is_cancelled(job.id),
+                )
+                payload["local_material_paths"] = clips
+                payload["visual_source"] = "local"
+                payload["video_script"] = (job.input_data or {}).get("video_script") or payload.get("video_script") or ""
             result = adapter.create_video(
                 payload,
                 task_id=f"saas-{job.id}",
@@ -122,12 +142,17 @@ class JobRunner:
                 "video_url": video_url,
             }
             if video:
+                previous_url = video.video_url
                 video.status = VideoStatus.completed.value
                 video.progress = 100
                 video.video_url = video_url
                 video.thumbnail_url = thumbnail_url
                 if result.audio_duration:
                     video.duration = float(result.audio_duration)
+                if previous_url:
+                    from apps.worker.director_runner import snapshot_version
+
+                    snapshot_version(self.db, video, previous_url)
             self.queue.set_job_status(job.id, "COMPLETED")
             from apps.api.services import credit_service
 
@@ -168,6 +193,45 @@ class JobRunner:
             return job
         finally:
             self._cleanup_work_dir(job_id)
+
+    def _uses_director(self, payload: dict[str, Any], video: Video | None) -> bool:
+        mode = str(payload.get("visual_mode") or (video.visual_mode if video else "stock") or "stock").lower()
+        if mode in {"stock", "stock_only", ""}:
+            return False
+        return True
+
+    def _process_scene(self, job: Job, video: Video | None) -> Job:
+        from apps.api.bootstrap import REPO_ROOT
+        from apps.api.models.scene import VideoScene
+        from apps.api.services import credit_service
+        from apps.api.services.visual_pipeline import generate_scene_visual
+
+        scene_id = str((job.input_data or {}).get("scene_id") or "")
+        scene = self.db.get(VideoScene, scene_id)
+        if scene is None or video is None:
+            raise GenerationError("scene not found")
+        work_dir = REPO_ROOT / "storage" / "saas-work" / job.id
+        generate_scene_visual(
+            self.db,
+            video=video,
+            scene=scene,
+            work_dir=work_dir,
+            should_cancel=lambda: self.queue.is_cancelled(job.id),
+        )
+        job.status = JobStatus.COMPLETED.value
+        job.progress = 100
+        job.current_stage = "COMPLETED"
+        job.completed_at = datetime.now(timezone.utc)
+        credit_service.capture(self.db, job.workspace_id, job.id, retry_count=job.retry_count or 0)
+        if video.video_url:
+            from apps.worker.director_runner import snapshot_version
+
+            snapshot_version(self.db, video, video.video_url)
+        from apps.api.services.video_service import enqueue_render
+
+        enqueue_render(self.db, self.queue, video, video.created_by)
+        self.db.commit()
+        return job
 
     def _cleanup_work_dir(self, job_id: str) -> None:
         from apps.api.bootstrap import REPO_ROOT

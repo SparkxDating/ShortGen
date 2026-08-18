@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from apps.api.api.routes import (
+    ai,
     assets,
     auth,
     billing,
@@ -29,4 +30,5 @@ api_router.include_router(templates.router, prefix="/templates", tags=["template
 api_router.include_router(scripts.router, prefix="/scripts", tags=["scripts"])
 api_router.include_router(billing.router, prefix="/billing", tags=["billing"])
 api_router.include_router(director.router, prefix="/director", tags=["director"])
+api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])

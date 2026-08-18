@@ -18,6 +18,7 @@ export default function VideoDetailPage() {
   const [busy, setBusy] = useState(false);
   const [publishNote, setPublishNote] = useState("");
   const [platforms, setPlatforms] = useState<string[]>(["tiktok", "instagram", "youtube"]);
+  const [scenes, setScenes] = useState<Array<{ id: string; order: number; visual_type: string; narration: string; status: string }>>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,6 +26,12 @@ export default function VideoDetailPage() {
       try {
         const next = await api.video(params.id);
         if (!cancelled) setVideo(next);
+        try {
+          const nextScenes = await api.videoScenes(params.id);
+          if (!cancelled) setScenes(nextScenes as Array<{ id: string; order: number; visual_type: string; narration: string; status: string }>);
+        } catch {
+          if (!cancelled) setScenes([]);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Video not found");
       }
@@ -160,6 +167,36 @@ export default function VideoDetailPage() {
                   </div>
                 </div>
                 {publishNote ? <p className="text-sm text-muted-foreground">{publishNote}</p> : null}
+                {scenes.length ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Scenes</p>
+                    {scenes.map((scene) => (
+                      <div key={scene.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+                        <span>
+                          {scene.order}. [{scene.visual_type}] {scene.narration}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={async () => {
+                            setBusy(true);
+                            try {
+                              await api.regenerateScene(params.id, scene.id);
+                              setPublishNote("Scene regenerating. Other scenes are kept.");
+                            } catch (err) {
+                              setError(err instanceof Error ? err.message : "Regenerate failed");
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                        >
+                          Regenerate
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </CardContent>

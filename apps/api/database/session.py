@@ -66,6 +66,10 @@ def _ensure_sqlite_columns(engine: Engine) -> None:
             ("worker_id", "VARCHAR(80)"),
             ("attempt_started_at", "DATETIME"),
         ),
+        "videos": (
+            ("visual_mode", "VARCHAR(20) DEFAULT 'stock'"),
+            ("plan_json", "JSON"),
+        ),
     }
     with engine.begin() as connection:
         for table, columns in patches.items():

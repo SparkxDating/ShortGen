@@ -13,6 +13,7 @@ from apps.api.models.job import Job, JobStatus, JobType
 from apps.api.models.project import Project
 from apps.api.models.template import Template
 from apps.api.models.user import User
+from apps.api.models.scene import ProviderGeneration, VideoScene, VideoVersion
 from apps.api.models.video import Video, VideoStatus
 from apps.api.models.workspace import Workspace, WorkspaceMember, WorkspaceRole
 
@@ -39,4 +40,7 @@ __all__ = [
     "BillingEvent",
     "JobOutbox",
     "IdempotencyKey",
+    "VideoScene",
+    "VideoVersion",
+    "ProviderGeneration",
 ]

@@ -13,7 +13,11 @@ from apps.api.schemas.job import JobResponse
 from apps.api.schemas.video import VideoCreate, VideoResponse
 from apps.api.models.outbox import IdempotencyKey
 from apps.api.observability import log_event
+from ai_engine.costs import credits_for_visual
+from ai_engine.director.schema import VideoPlan
+from apps.api.config import get_settings
 from apps.api.services import credit_service, outbox_service, workspace_service
+from apps.api.services.director_service import persist_plan
 from apps.api.services.errors import NotFoundError, ServiceError
 from apps.api.services.job_service import latest_job_for_video
 from shared.queue.interface import JobQueue
@@ -104,6 +108,9 @@ def create_video(
                 raise NotFoundError("asset not found")
     if payload.visual_source == "local" and not asset_ids:
         raise ServiceError("local media requires at least one workspace asset", status_code=400)
+    settings = get_settings()
+    if payload.visual_mode == "ai_video" and not settings.ai_video_enabled:
+        raise ServiceError("AI video generation is temporarily unavailable", status_code=409)
 
     video = Video(
         workspace_id=payload.workspace_id,
@@ -115,6 +122,8 @@ def create_video(
         aspect_ratio=payload.aspect_ratio,
         resolution=payload.resolution,
         created_by=user_id,
+        visual_mode=payload.visual_mode,
+        plan_json=payload.director_plan,
     )
     db.add(video)
     db.flush()
@@ -138,7 +147,12 @@ def create_video(
         "video_id": video.id,
         "workspace_id": payload.workspace_id,
         "project_id": payload.project_id,
-        "credit_cost": credit_service.estimate_credits(payload.duration, payload.resolution),
+        "visual_mode": payload.visual_mode,
+        "style": payload.style,
+        "tone": payload.tone,
+        "target_platform": payload.target_platform,
+        "director_plan": payload.director_plan,
+        "credit_cost": _credit_cost(payload),
     }
     job = Job(
         workspace_id=payload.workspace_id,
@@ -151,6 +165,11 @@ def create_video(
     )
     db.add(job)
     db.flush()
+    if payload.director_plan:
+        try:
+            persist_plan(db, video, VideoPlan.model_validate(payload.director_plan))
+        except Exception:
+            logger.warning("director plan not persisted video_id=%s", video.id)
     try:
         credit_service.reserve(
             db,
@@ -197,3 +216,123 @@ def delete_video(db: Session, video_id: str, user_id: str) -> None:
     workspace_service.require_membership(db, video.workspace_id, user_id, WorkspaceRole.admin)
     db.delete(video)
     db.commit()
+
+
+def _credit_cost(payload: VideoCreate) -> int:
+    base = credit_service.estimate_credits(payload.duration, payload.resolution)
+    extra = 0
+    plan = payload.director_plan or {}
+    scenes = plan.get("scenes") if isinstance(plan, dict) else None
+    if scenes:
+        extra = sum(credits_for_visual(str(scene.get("visual_type") or "")) for scene in scenes if isinstance(scene, dict))
+    elif payload.visual_mode == "ai_video":
+        extra = credits_for_visual("ai_video")
+    elif payload.visual_mode in {"auto", "mixed"}:
+        extra = credits_for_visual("ai_video")
+    return base + extra
+
+
+def start_generation(db: Session, queue: JobQueue, video_id: str, user_id: str) -> VideoResponse:
+    video = db.get(Video, video_id)
+    if video is None:
+        raise NotFoundError("video not found")
+    workspace_service.require_membership(db, video.workspace_id, user_id, WorkspaceRole.editor)
+    if video.status in {VideoStatus.queued.value, VideoStatus.processing.value}:
+        return get_video(db, video.id, user_id)
+    settings = get_settings()
+    if video.visual_mode == "ai_video" and not settings.ai_video_enabled:
+        raise ServiceError("AI video generation is temporarily unavailable", status_code=409)
+    cost = credit_service.estimate_credits(video.duration, video.resolution)
+    if isinstance(video.plan_json, dict):
+        for scene in video.plan_json.get("scenes") or []:
+            if isinstance(scene, dict):
+                cost += credits_for_visual(str(scene.get("visual_type") or ""))
+    video.status = VideoStatus.queued.value
+    job = Job(
+        workspace_id=video.workspace_id,
+        video_id=video.id,
+        job_type=JobType.generate_video.value,
+        status=JobStatus.QUEUED.value,
+        current_stage="QUEUED",
+        input_data={
+            "topic": video.title,
+            "title": video.title,
+            "duration": int(video.duration or 30),
+            "aspect_ratio": video.aspect_ratio,
+            "resolution": video.resolution,
+            "visual_mode": video.visual_mode,
+            "director_plan": video.plan_json,
+            "workspace_id": video.workspace_id,
+            "video_id": video.id,
+            "credit_cost": cost,
+        },
+    )
+    db.add(job)
+    db.flush()
+    credit_service.reserve(db, video.workspace_id, job.id, cost, created_by=user_id)
+    outbox_service.enqueue_pending(db, job.id, job.input_data or {})
+    db.commit()
+    try:
+        outbox_service.dispatch(db, queue, job.id)
+    except Exception:
+        logger.warning("queue dispatch deferred job_id=%s", job.id)
+    return get_video(db, video.id, user_id)
+
+
+def enqueue_render(db: Session, queue: JobQueue, video: Video, user_id: str | None = None) -> Job:
+    """Re-render from stored scene clips. Does not charge AI scene costs again."""
+    cost = credit_service.estimate_credits(video.duration, video.resolution)
+    job = Job(
+        workspace_id=video.workspace_id,
+        video_id=video.id,
+        job_type=JobType.render_video.value,
+        status=JobStatus.QUEUED.value,
+        current_stage="QUEUED",
+        input_data={
+            "topic": video.title,
+            "title": video.title,
+            "duration": int(video.duration or 30),
+            "aspect_ratio": video.aspect_ratio,
+            "resolution": video.resolution,
+            "visual_mode": video.visual_mode or "auto",
+            "director_plan": video.plan_json,
+            "workspace_id": video.workspace_id,
+            "video_id": video.id,
+            "credit_cost": cost,
+            "reuse_ready_scenes": True,
+        },
+    )
+    db.add(job)
+    db.flush()
+    credit_service.reserve(db, video.workspace_id, job.id, cost, created_by=user_id)
+    video.status = VideoStatus.queued.value
+    outbox_service.enqueue_pending(db, job.id, job.input_data or {})
+    try:
+        outbox_service.dispatch(db, queue, job.id)
+    except Exception:
+        logger.warning("render dispatch deferred job_id=%s", job.id)
+    return job
+
+
+def generation_status(db: Session, video_id: str, user_id: str) -> dict:
+    video = get_video(db, video_id, user_id)
+    from apps.api.models.scene import VideoScene
+
+    scenes = list(db.scalars(select(VideoScene).where(VideoScene.video_id == video_id).order_by(VideoScene.order.asc())).all())
+    return {
+        "video_id": video.id,
+        "status": video.status,
+        "progress": video.progress,
+        "visual_mode": video.visual_mode,
+        "latest_job": video.latest_job.model_dump() if video.latest_job else None,
+        "scenes": [
+            {
+                "id": scene.id,
+                "order": scene.order,
+                "status": scene.status,
+                "progress": scene.progress,
+                "visual_type": scene.visual_type,
+            }
+            for scene in scenes
+        ],
+    }

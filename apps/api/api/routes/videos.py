@@ -8,7 +8,8 @@ from apps.api.database.session import get_db
 from apps.api.models.user import User
 from apps.api.schemas.common import ORMModel
 from apps.api.schemas.video import VideoCreate, VideoResponse
-from apps.api.services import publish_service, video_service
+from apps.api.schemas.director import ScenePatch
+from apps.api.services import publish_service, scene_service, video_service
 
 
 class PublishRequest(ORMModel):
@@ -62,6 +63,83 @@ def publish_video(
 ) -> dict:
     platforms = [item for item in (payload.platforms if payload else []) if item]
     return publish_service.publish_video(db, video_id, current_user.id, platforms or None)
+
+
+@router.get("/{video_id}/scenes")
+def list_scenes(video_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return scene_service.list_scenes(db, video_id, current_user.id)
+
+
+@router.get("/{video_id}/scenes/{scene_id}")
+def get_scene(
+    video_id: str,
+    scene_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return scene_service.get_scene(db, video_id, scene_id, current_user.id)
+
+
+@router.patch("/{video_id}/scenes/{scene_id}")
+def patch_scene(
+    video_id: str,
+    scene_id: str,
+    payload: ScenePatch,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return scene_service.patch_scene(db, video_id, scene_id, current_user.id, payload)
+
+
+@router.post("/{video_id}/scenes/{scene_id}/regenerate")
+def regenerate_scene(
+    video_id: str,
+    scene_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return scene_service.regenerate_scene(db, queue_from_app(request), video_id, scene_id, current_user.id)
+
+
+@router.post("/{video_id}/generate")
+def generate_video(
+    video_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return video_service.start_generation(db, queue_from_app(request), video_id, current_user.id)
+
+
+@router.post("/{video_id}/render")
+def render_video(
+    video_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return video_service.start_generation(db, queue_from_app(request), video_id, current_user.id)
+
+
+@router.get("/{video_id}/generation-status")
+def generation_status(video_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return video_service.generation_status(db, video_id, current_user.id)
+
+
+@router.post("/{video_id}/cancel")
+def cancel_video(
+    video_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    video = video_service.get_video(db, video_id, current_user.id)
+    if not video.latest_job:
+        return {"status": "ok"}
+    from apps.api.services import job_service
+
+    return job_service.cancel_job(db, queue_from_app(request), video.latest_job.id, current_user.id)
 
 
 @router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)

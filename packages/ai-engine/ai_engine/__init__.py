@@ -1,5 +1,8 @@
-"""AI engine adapters.
+"""AI Director planning and visual provider adapters.
 
-Phase 1 does not add a second LLM stack. Script generation continues to
-use ``app.services.llm`` through ``MoneyPrinterTurboGenerationAdapter``.
+Rendering stays in MoneyPrinterTurboGenerationAdapter.
 """
+
+from ai_engine.providers import list_providers
+
+__all__ = ["list_providers"]

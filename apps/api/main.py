@@ -67,6 +67,7 @@ app.state.storage = get_storage()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
+    allow_origin_regex=r"https://([a-z0-9-]+\.)+(trycloudflare\.com|loca\.lt|vercel\.app)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,7 +80,10 @@ app.include_router(api_router, prefix="/api/v1")
 async def rate_limit_middleware(request: Request, call_next):
     if request.url.path.startswith("/health") or request.url.path.startswith("/ready"):
         return await call_next(request)
-    client = request.client.host if request.client else "unknown"
+    forwarded = (request.headers.get("cf-connecting-ip") or "").strip()
+    if not forwarded:
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    client = forwarded or (request.client.host if request.client else "unknown")
     if not rate_limiter.allow(client):
         return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"})
     return await call_next(request)

@@ -9,17 +9,21 @@ from __future__ import annotations
 import hashlib
 import random
 import re
+from uuid import uuid4
 
 
-def write_script(topic: str, language: str = "en-US") -> str:
+def write_script(topic: str, language: str = "en-US", vary: bool = False) -> str:
     clean = re.sub(r"\s+", " ", (topic or "").strip()) or "this topic"
     if language.lower().startswith("zh"):
-        return _write_zh(clean)
-    return _write_en(clean)
+        return _write_zh(clean, vary=vary)
+    return _write_en(clean, vary=vary)
 
 
-def _rng(topic: str) -> random.Random:
-    digest = hashlib.sha256(topic.lower().encode("utf-8")).hexdigest()
+def _rng(topic: str, vary: bool = False) -> random.Random:
+    seed = topic.lower()
+    if vary:
+        seed = f"{seed}:{uuid4().hex}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
     return random.Random(int(digest[:16], 16))
 
 
@@ -45,8 +49,8 @@ def _classify(topic: str) -> str:
     return "explainer"
 
 
-def _write_en(topic: str) -> str:
-    rng = _rng(topic)
+def _write_en(topic: str, vary: bool = False) -> str:
+    rng = _rng(topic, vary=vary)
     style = _classify(topic)
     words = _words(topic)
     subject = topic[0].upper() + topic[1:] if topic else "This topic"
@@ -230,8 +234,8 @@ def _write_en(topic: str) -> str:
     return "\n\n".join((pick(hooks), pick(bodies), pick(closes)))
 
 
-def _write_zh(topic: str) -> str:
-    rng = _rng(topic)
+def _write_zh(topic: str, vary: bool = False) -> str:
+    rng = _rng(topic, vary=vary)
     hooks = (
         f"先把「{topic}」说清楚。",
         f"关于{topic}，你其实只需要记住这三句。",

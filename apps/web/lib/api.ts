@@ -17,7 +17,14 @@ import type {
 const TOKEN_KEY = "mpt_saas_token";
 
 export function getApiBase(): string {
-  return process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const configured = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  if (typeof window === "undefined") return configured;
+  const host = window.location.hostname;
+  if (host === "localhost" || host === "127.0.0.1") {
+    return "http://127.0.0.1:8000";
+  }
+  // Public tunnels and Vercel: same-origin. Next rewrites /api and /storage to the API.
+  return "";
 }
 
 export function getToken(): string | null {
@@ -163,7 +170,7 @@ export const api = {
     }),
   deleteTemplate: (id: string) => request<void>(`/api/v1/templates/${id}`, { method: "DELETE" }),
   previewScript: (payload: { workspace_id: string; topic: string; video_language: string }) =>
-    request<{ script: string }>("/api/v1/scripts/preview", {
+    request<{ script: string; source?: string; provider?: string | null; warning?: string }>("/api/v1/scripts/preview", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -208,14 +215,84 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
-  publishVideo: (id: string) =>
+  providerKeys: () =>
+    request<{
+      llm_provider: string;
+      keys: Array<{ id: string; label: string; configured: boolean; llm_provider: string | null }>;
+    }>("/api/v1/settings/keys"),
+  saveProviderKeys: (payload: {
+    llm_provider?: string;
+    kimi?: string;
+    openai?: string;
+    gemini?: string;
+    deepseek?: string;
+    pexels?: string;
+  }) =>
+    request<{
+      llm_provider: string;
+      keys: Array<{ id: string; label: string; configured: boolean; llm_provider: string | null }>;
+    }>("/api/v1/settings/keys", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  publishVideo: (id: string, platforms: string[] = []) =>
     request<{
       video_id: string;
       success: boolean;
       configured: boolean;
       platforms: string[];
       error?: string | null;
-    }>(`/api/v1/videos/${id}/publish`, { method: "POST" }),
+    }>(`/api/v1/videos/${id}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ platforms }),
+    }),
+  socialSettings: () =>
+    request<{
+      configured: boolean;
+      enabled: boolean;
+      username_set: boolean;
+      platforms: string[];
+      message: string;
+    }>("/api/v1/settings/social"),
+  saveSocialSettings: (payload: {
+    api_key?: string;
+    username?: string;
+    enabled?: boolean;
+    platforms?: string[];
+  }) =>
+    request<{
+      configured: boolean;
+      enabled: boolean;
+      username_set: boolean;
+      platforms: string[];
+      message: string;
+    }>("/api/v1/settings/social", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  stripeSettings: () =>
+    request<{
+      provider: string;
+      live_ready: boolean;
+      secret_set: boolean;
+      webhook_set: boolean;
+      webhook_url: string;
+      public_api_url: string;
+      message: string;
+    }>("/api/v1/settings/stripe"),
+  saveStripeSettings: (payload: { secret_key?: string; webhook_secret?: string; enable?: boolean }) =>
+    request<{
+      provider: string;
+      live_ready: boolean;
+      secret_set: boolean;
+      webhook_set: boolean;
+      webhook_url: string;
+      public_api_url: string;
+      message: string;
+    }>("/api/v1/settings/stripe", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 };
 
 export function resolveMediaUrl(url: string | null | undefined): string | null {

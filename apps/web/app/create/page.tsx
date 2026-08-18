@@ -98,6 +98,9 @@ function CreateForm() {
         video_language: String(new FormData(form).get("video_language") || "en-US"),
       });
       setScript(result.script);
+      if (result.warning) {
+        setError(result.warning);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Script preview failed");
     } finally {
@@ -133,6 +136,9 @@ function CreateForm() {
         voice: String(form.get("voice")),
         visual_source: String(form.get("visual_source")),
         video_script: script,
+        video_clip_duration: Number(form.get("video_clip_duration") || 3),
+        match_materials_to_script: form.get("match_materials_to_script") === "on",
+        video_concat_mode: String(form.get("video_concat_mode") || "sequential"),
         template_id: String(form.get("template_id") || "") || null,
         asset_ids: visualSource === "local" ? selectedAssets : [],
       });
@@ -307,7 +313,44 @@ function CreateForm() {
                   <option value="local">Local Media</option>
                 </select>
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="video_clip_duration">Clip length</Label>
+                <select
+                  id="video_clip_duration"
+                  name="video_clip_duration"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  defaultValue="3"
+                >
+                  <option value="2">2 seconds (tight)</option>
+                  <option value="3">3 seconds (recommended)</option>
+                  <option value="4">4 seconds</option>
+                  <option value="5">5 seconds (slower)</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="video_concat_mode">Clip order</Label>
+                <select
+                  id="video_concat_mode"
+                  name="video_concat_mode"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  defaultValue="sequential"
+                >
+                  <option value="sequential">Follow the script</option>
+                  <option value="random">Shuffle clips</option>
+                </select>
+              </div>
             </div>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="match_materials_to_script"
+                defaultChecked
+                className="mt-1"
+              />
+              <span>
+                Match Pexels search terms to the narration order. Turn this on if pictures feel random or out of time.
+              </span>
+            </label>
             {visualSource === "local" ? (
               <div className="space-y-2">
                 <Label>Workspace assets</Label>

@@ -17,6 +17,23 @@ from apps.api.services import workspace_service
 from apps.api.services.errors import NotFoundError, ServiceError
 from shared.security.filenames import safe_object_key
 
+ALLOWED_PLATFORMS = {"tiktok", "instagram", "youtube", "youtube-shorts"}
+
+
+def _normalize_platforms(platforms: list[str] | None) -> list[str] | None:
+    if not platforms:
+        return None
+    seen: list[str] = []
+    for item in platforms:
+        name = str(item).strip().lower()
+        if name == "ig":
+            name = "instagram"
+        if name == "yt":
+            name = "youtube"
+        if name in ALLOWED_PLATFORMS and name not in seen:
+            seen.append(name)
+    return seen or None
+
 
 def _local_video_path(video: Video) -> str | None:
     url = video.video_url or ""
@@ -50,17 +67,36 @@ def publish_video(
 
     from app.services.upload_post import UploadPostService
 
+    chosen = _normalize_platforms(platforms)
     service = UploadPostService()
+    if not service.is_configured():
+        return {
+            "video_id": video.id,
+            "success": False,
+            "configured": False,
+            "platforms": chosen or list(service.platforms or []),
+            "error": "Connect Upload-Post in Settings (API key + username) and enable publishing.",
+            "raw": None,
+        }
+    youtube_extra = None
+    targets = chosen or list(service.platforms or [])
+    if any(str(item).startswith("youtube") for item in targets):
+        youtube_extra = {
+            "youtube_title": (video.title or "ShortGen video")[:100],
+            "youtube_description": video.title or "Created with ShortGen",
+            "privacyStatus": str(getattr(service, "youtube_privacy_status", "public") or "public"),
+        }
     result = service.upload_video(
         video_path=path,
         title=video.title,
-        platforms=platforms,
+        platforms=chosen,
+        youtube_extra=youtube_extra,
     )
     return {
         "video_id": video.id,
         "success": bool(result.get("success")),
-        "configured": service.is_configured(),
-        "platforms": platforms or service.platforms,
-        "error": result.get("error"),
+        "configured": True,
+        "platforms": targets,
+        "error": result.get("error") or result.get("message"),
         "raw": result,
     }

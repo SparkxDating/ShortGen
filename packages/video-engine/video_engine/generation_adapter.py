@@ -108,6 +108,12 @@ class MoneyPrinterTurboGenerationAdapter:
         # pull MoviePy/Whisper at import time.
         from app.models.schema import VideoParams  # noqa: F401
         from app.services import task as task_service  # noqa: F401
+        try:
+            from apps.api.services.provider_keys_service import reload_from_disk
+
+            reload_from_disk()
+        except Exception:
+            pass
 
     def build_params(self, payload: dict[str, Any]):
         from app.models.schema import VideoAspect, VideoConcatMode, VideoParams
@@ -145,8 +151,14 @@ class MoneyPrinterTurboGenerationAdapter:
             ),
             video_source=video_source,
             video_materials=materials,
-            video_concat_mode=VideoConcatMode.random,
-            video_clip_duration=int(payload.get("video_clip_duration") or 5),
+            video_concat_mode=(
+                VideoConcatMode.sequential
+                if payload.get("match_materials_to_script", True)
+                or str(payload.get("video_concat_mode") or "sequential") == "sequential"
+                else VideoConcatMode.random
+            ),
+            video_clip_duration=int(payload.get("video_clip_duration") or 3),
+            match_materials_to_script=bool(payload.get("match_materials_to_script", True)),
             paragraph_number=int(payload.get("paragraph_number") or 1),
             subtitle_enabled=bool(payload.get("subtitle_enabled", True)),
         )

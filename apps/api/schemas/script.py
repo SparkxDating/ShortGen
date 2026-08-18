@@ -16,3 +16,6 @@ class ScriptPreviewResponse(ORMModel):
     script: str
     topic: str
     video_language: str
+    source: str = "local"
+    provider: str | None = None
+    warning: str = ""

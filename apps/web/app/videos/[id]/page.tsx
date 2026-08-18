@@ -17,6 +17,7 @@ export default function VideoDetailPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [publishNote, setPublishNote] = useState("");
+  const [platforms, setPlatforms] = useState<string[]>(["tiktok", "instagram", "youtube"]);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,12 +58,12 @@ export default function VideoDetailPage() {
     setBusy(true);
     setPublishNote("");
     try {
-      const result = await api.publishVideo(params.id);
+      const result = await api.publishVideo(params.id, platforms);
       if (result.success) {
-        setPublishNote(`Published to ${(result.platforms || []).join(", ") || "configured platforms"}.`);
+        setPublishNote(`Posted to ${(result.platforms || []).join(", ") || "TikTok, Instagram, YouTube"}.`);
       } else if (!result.configured) {
         setPublishNote(
-          "Social publish is initiated but Upload-Post is not configured. Add upload_post_api_key in config.toml.",
+          "Open Settings → Post to TikTok, Instagram, YouTube. Create an Upload-Post account, connect those apps, then paste the API key and username.",
         );
       } else {
         setError(result.error || "Publish failed");
@@ -132,13 +133,31 @@ export default function VideoDetailPage() {
             {job?.status === "COMPLETED" && media ? (
               <div className="space-y-4">
                 <video className="w-full rounded-lg border border-border" src={media} controls />
-                <div className="flex gap-2">
-                  <a href={media} download>
-                    <Button variant="secondary">Download</Button>
-                  </a>
-                  <Button variant="outline" disabled={busy} onClick={publish}>
-                    Publish
-                  </Button>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    {["tiktok", "instagram", "youtube"].map((name) => (
+                      <label key={name} className="flex items-center gap-2 capitalize">
+                        <input
+                          type="checkbox"
+                          checked={platforms.includes(name)}
+                          onChange={() =>
+                            setPlatforms((current) =>
+                              current.includes(name) ? current.filter((item) => item !== name) : [...current, name],
+                            )
+                          }
+                        />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <a href={media} download>
+                      <Button variant="secondary">Download</Button>
+                    </a>
+                    <Button variant="outline" disabled={busy || platforms.length === 0} onClick={publish}>
+                      Publish
+                    </Button>
+                  </div>
                 </div>
                 {publishNote ? <p className="text-sm text-muted-foreground">{publishNote}</p> : null}
               </div>

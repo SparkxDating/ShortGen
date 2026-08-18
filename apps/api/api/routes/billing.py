@@ -94,11 +94,14 @@ def ledger(
 @router.post("/checkout", response_model=CheckoutResponse)
 def checkout(
     payload: CheckoutRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     settings = get_settings()
-    origin = settings.cors_origins[0] if settings.cors_origins else "http://127.0.0.1:3000"
+    origin = request.headers.get("origin") or (
+        settings.cors_origins[0] if settings.cors_origins else "http://127.0.0.1:3000"
+    )
     return billing_service.checkout(
         db,
         current_user.id,

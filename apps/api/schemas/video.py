@@ -22,6 +22,9 @@ class VideoCreate(ORMModel):
     visual_source: Literal["stock", "local"] = "stock"
     video_script: str = Field(default="", max_length=20000)
     subtitle_enabled: bool = True
+    video_clip_duration: int = Field(default=3, ge=2, le=8)
+    match_materials_to_script: bool = True
+    video_concat_mode: Literal["sequential", "random"] = "sequential"
     asset_ids: list[str] = Field(default_factory=list)
     template_id: str | None = None
 

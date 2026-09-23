@@ -23,6 +23,10 @@ class WebhookResult:
     kind: str | None
     item_id: str | None
     payload: dict[str, Any]
+    customer_id: str | None = None
+    subscription_id: str | None = None
+    period_end: int | None = None
+    mode: str | None = None
 
 
 class BillingProvider(Protocol):

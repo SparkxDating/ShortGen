@@ -107,11 +107,34 @@ export default function BillingPage() {
             <CardTitle>Plan</CardTitle>
             <CardDescription>{usage?.subscription_status || "none"}</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <p className="text-xl font-medium">{usage?.plan?.name || "Free"}</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {usage?.plan?.monthly_credits ?? 100} credits / month
+            <p className="text-sm text-muted-foreground">
+              {usage?.plan?.monthly_credits ?? 100} credits each month
             </p>
+            {providerStatus?.provider === "stripe" && canBuy ? (
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={busy === "portal"}
+                onClick={() => {
+                  if (!workspace) return;
+                  setBusy("portal");
+                  setError("");
+                  api
+                    .billingPortal(workspace.id)
+                    .then((result) => {
+                      window.location.href = result.url;
+                    })
+                    .catch((err) => {
+                      setError(err instanceof Error ? err.message : "Could not open billing portal");
+                      setBusy("");
+                    });
+                }}
+              >
+                {busy === "portal" ? "Working…" : "Manage subscription"}
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
         <Card>
@@ -141,7 +164,7 @@ export default function BillingPage() {
               <p className="text-2xl font-semibold">
                 {plan.price_cents === 0 ? "Free" : money(plan.price_cents, plan.currency)}
               </p>
-              <p className="text-sm text-muted-foreground">{plan.monthly_credits} credits / month</p>
+              <p className="text-sm text-muted-foreground">{plan.monthly_credits} credits every month</p>
               {canBuy && plan.price_cents > 0 ? (
                 <Button
                   className="w-full"
@@ -149,7 +172,7 @@ export default function BillingPage() {
                   disabled={busy === plan.id}
                   onClick={() => buy("plan", plan.id)}
                 >
-                  {busy === plan.id ? "Working…" : "Choose plan"}
+                  {busy === plan.id ? "Working…" : "Subscribe"}
                 </Button>
               ) : null}
             </CardContent>

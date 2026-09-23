@@ -8,11 +8,14 @@ job table.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
+
+logger = logging.getLogger("saas.generation")
 
 from video_engine.stages import stage_progress
 
@@ -49,8 +52,93 @@ class GenerationResult:
         return None
 
 
-def _demo_materials(task_id: str, audio_duration: float) -> list[str]:
-    """Use bundled stills as local clips when stock APIs are not configured."""
+def _card_captions(subject: str, script: str, count: int = 4) -> list[str]:
+    """Short on-screen lines when stock footage is unavailable."""
+    text = re.sub(r"\s+", " ", script or "").strip()
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    if not sentences:
+        sentences = [subject.strip() or "Your short"]
+    captions = [sentences[index % len(sentences)] for index in range(count)]
+    title = subject.strip()
+    if title:
+        captions[0] = title
+    return captions
+
+
+def _wrap_text(draw, text: str, font, width: int) -> list[str]:
+    words = (text or "").split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = word if not current else f"{current} {word}"
+        try:
+            fits = draw.textlength(trial, font=font) <= width
+        except Exception:
+            fits = len(trial) <= 28
+        if fits:
+            current = trial
+            continue
+        if current:
+            lines.append(current)
+        current = word
+    if current:
+        lines.append(current)
+    return lines[:8]
+
+
+def _studio_font(size: int):
+    from PIL import ImageFont
+    from app.utils import utils
+
+    candidates = [
+        Path(utils.root_dir()) / "resource" / "fonts" / "BeVietnamPro-Bold.ttf",
+        Path(utils.root_dir()) / "resource" / "fonts" / "Charm-Bold.ttf",
+    ]
+    for path in candidates:
+        if path.is_file():
+            try:
+                return ImageFont.truetype(str(path), size=size)
+            except Exception:
+                continue
+    return ImageFont.load_default()
+
+
+def _studio_card(caption: str, index: int, width: int = 720, height: int = 1280):
+    from PIL import Image, ImageDraw
+
+    palettes = (
+        ((18, 18, 24), (245, 245, 240)),
+        ((20, 44, 62), (232, 244, 248)),
+        ((48, 28, 22), (255, 236, 214)),
+        ((24, 40, 30), (226, 240, 214)),
+    )
+    background, foreground = palettes[index % len(palettes)]
+    image = Image.new("RGB", (width, height), background)
+    draw = ImageDraw.Draw(image)
+    label = _studio_font(36)
+    body = _studio_font(54)
+    draw.text((64, 96), f"{index + 1:02d}", font=label, fill=foreground)
+    lines = _wrap_text(draw, caption, body, width - 128)
+    y = 220
+    for line in lines:
+        draw.text((64, y), line, font=body, fill=foreground)
+        y += 72
+    return image
+
+
+def _demo_materials(
+    task_id: str,
+    audio_duration: float,
+    subject: str = "",
+    script: str = "",
+) -> list[str]:
+    """Build short clips when Pexels (or other stock) returns nothing.
+
+    Bundled PNGs are used when present. Otherwise Pillow draws portrait
+    title cards from the topic and script so a render can still finish.
+    """
     from app.utils import utils
 
     roots = [
@@ -61,28 +149,40 @@ def _demo_materials(task_id: str, audio_duration: float) -> list[str]:
     for root in roots:
         if root.is_dir():
             images.extend(sorted(root.glob("*.png"))[:6])
-    if not images:
-        return []
+    captions = _card_captions(subject, script, count=max(4, len(images) or 4))
     out_dir = Path(utils.task_dir(task_id))
     out_dir.mkdir(parents=True, exist_ok=True)
-    clip_len = max(2.0, min(5.0, float(audio_duration or 8) / max(1, len(images)))
-    )
+    frame_count = len(images) or len(captions)
+    clip_len = max(2.0, min(5.0, float(audio_duration or 8) / max(1, frame_count)))
     paths: list[str] = []
     try:
+        import numpy as np
         from moviepy import ImageClip
     except Exception:
-        return []
-    for index, image in enumerate(images):
+        logger.warning("moviepy is not installed; studio cards cannot be encoded")
+        return [], ""
+    frames: list[Any] = [str(image) for image in images]
+    if not frames:
+        try:
+            frames = [_studio_card(caption, index) for index, caption in enumerate(captions)]
+        except Exception:
+            logger.exception("studio card draw failed")
+            return [], ""
+        logger.info("using studio title cards task_id=%s cards=%s", task_id, len(frames))
+    kind = "cards" if not images else "stills"
+    for index, frame in enumerate(frames):
         dest = out_dir / f"demo-{index}.mp4"
         try:
-            clip = ImageClip(str(image)).with_duration(clip_len).with_fps(24)
+            source = frame if isinstance(frame, str) else np.asarray(frame)
+            clip = ImageClip(source).with_duration(clip_len).with_fps(24)
             clip.write_videofile(str(dest), fps=24, audio=False, logger=None, threads=1)
             clip.close()
-            if dest.is_file():
+            if dest.is_file() and dest.stat().st_size > 0:
                 paths.append(str(dest))
         except Exception:
+            logger.exception("studio card encode failed index=%s", index)
             continue
-    return paths
+    return paths, kind
 
 
 def _local_terms(subject: str, script: str) -> list[str]:
@@ -274,10 +374,19 @@ class MoneyPrinterTurboGenerationAdapter:
         check_cancel()
 
         report("FETCHING_MEDIA")
+        used_studio_cards = False
+        used_bundled_stills = False
         try:
             materials = self.fetch_media(task_id, params, terms, audio_duration)
         except GenerationError:
-            materials = _demo_materials(task_id, float(audio_duration or 8))
+            materials, fallback_kind = _demo_materials(
+                task_id,
+                float(audio_duration or 8),
+                str(getattr(params, "video_subject", "") or ""),
+                script,
+            )
+            used_studio_cards = fallback_kind == "cards" and bool(materials)
+            used_bundled_stills = fallback_kind == "stills" and bool(materials)
             if not materials:
                 raise
         result.materials = list(materials)
@@ -295,6 +404,14 @@ class MoneyPrinterTurboGenerationAdapter:
         result.video_paths = list(video_paths)
         result.combined_video_paths = list(combined_paths)
         result.warnings = list(warnings)
+        if used_studio_cards:
+            result.warnings.append(
+                "Stock footage was unavailable. Studio title cards were used."
+            )
+        elif used_bundled_stills:
+            result.warnings.append(
+                "Stock footage was unavailable. Bundled stills were used."
+            )
         result.raw = {
             "script": script,
             "terms": terms,
@@ -304,6 +421,6 @@ class MoneyPrinterTurboGenerationAdapter:
             "materials": materials,
             "videos": video_paths,
             "combined_videos": combined_paths,
-            "warnings": warnings,
+            "warnings": result.warnings,
         }
         return result

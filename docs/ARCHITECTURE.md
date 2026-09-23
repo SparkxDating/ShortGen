@@ -134,7 +134,10 @@ Credits live on the workspace, not the user.
 - Success captures the reservation
 - Failure or cancel refunds it
 - `BILLING_PROVIDER=local` completes pack/plan purchases immediately
-- `stripe` and `razorpay` adapters exist; they are unused unless keys are set
+- Stripe plan checkout is a monthly subscription. Credits are granted on each `invoice.paid`, not on the success redirect
+- Credit packs stay one-time payments
+- `customer.subscription.deleted` marks the workspace subscription canceled
+- The billing page opens the Stripe customer portal after a customer id is stored
 - Webhooks are idempotent via `billing_events.event_id`
 
 ## What was intentionally left untouched

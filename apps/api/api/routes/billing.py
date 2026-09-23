@@ -10,6 +10,8 @@ from apps.api.schemas.billing import (
     CheckoutRequest,
     CheckoutResponse,
     CreditPackResponse,
+    PortalRequest,
+    PortalResponse,
     DevGrantRequest,
     EstimateResponse,
     LedgerEntryResponse,
@@ -48,18 +50,12 @@ def billing_status() -> BillingStatusResponse:
 
 
 @router.get("/plans", response_model=list[PlanResponse])
-def list_plans(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[PlanResponse]:
+def list_plans(db: Session = Depends(get_db)) -> list[PlanResponse]:
     return billing_service.list_plans(db)
 
 
 @router.get("/packs", response_model=list[CreditPackResponse])
-def list_packs(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> list[CreditPackResponse]:
+def list_packs(db: Session = Depends(get_db)) -> list[CreditPackResponse]:
     return billing_service.list_packs(db)
 
 
@@ -111,6 +107,21 @@ def checkout(
         success_url=f"{origin}/billing?status=success",
         cancel_url=f"{origin}/billing?status=cancel",
     )
+
+
+@router.post("/portal", response_model=PortalResponse)
+def billing_portal(
+    payload: PortalRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> PortalResponse:
+    settings = get_settings()
+    origin = request.headers.get("origin") or (
+        settings.cors_origins[0] if settings.cors_origins else "http://127.0.0.1:3000"
+    )
+    url = billing_service.create_portal(db, payload.workspace_id, current_user.id, f"{origin}/billing")
+    return PortalResponse(url=url)
 
 
 @router.post("/dev/grant")

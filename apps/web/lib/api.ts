@@ -207,6 +207,11 @@ export const api = {
       environment: string;
       message: string;
     }>("/api/v1/billing/status"),
+  billingPortal: (workspaceId: string) =>
+    request<{ url: string }>("/api/v1/billing/portal", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    }),
   directorProviders: () =>
     request<Array<{ id: string; label: string; status: string; notes?: string }>>(
       "/api/v1/director/providers",

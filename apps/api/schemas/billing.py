@@ -81,6 +81,14 @@ class DevGrantRequest(ORMModel):
     description: str = "Development credit grant"
 
 
+class PortalRequest(ORMModel):
+    workspace_id: str
+
+
+class PortalResponse(ORMModel):
+    url: str
+
+
 class BillingStatusResponse(ORMModel):
     provider: str
     live_ready: bool

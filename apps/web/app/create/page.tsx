@@ -312,6 +312,11 @@ function CreateForm() {
                   <option value="stock">Stock Media</option>
                   <option value="local">Local Media</option>
                 </select>
+                {visualSource === "stock" ? (
+                  <p className="text-xs text-muted-foreground">
+                    If stock search has no clips, the render uses studio title cards from your script.
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="video_clip_duration">Clip length</Label>

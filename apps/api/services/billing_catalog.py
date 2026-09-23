@@ -11,21 +11,21 @@ PLANS = [
     {
         "slug": "free",
         "name": "Free",
-        "description": "Enough credits to try the studio.",
+        "description": "100 credits to try the studio. About four 30-second HD shorts.",
         "monthly_credits": 100,
         "price_cents": 0,
     },
     {
         "slug": "starter",
         "name": "Starter",
-        "description": "For a single creator shipping weekly.",
+        "description": "500 credits every month. About twenty 30-second HD shorts for one creator.",
         "monthly_credits": 500,
         "price_cents": 1900,
     },
     {
         "slug": "pro",
         "name": "Pro",
-        "description": "For a small team with daily generation.",
+        "description": "2,000 credits every month. About eighty HD shorts for a channel that posts daily.",
         "monthly_credits": 2000,
         "price_cents": 4900,
     },
@@ -42,6 +42,11 @@ def seed_billing_catalog(db: Session) -> None:
     for item in PLANS:
         existing = db.scalar(select(Plan).where(Plan.slug == item["slug"]))
         if existing:
+            existing.name = item["name"]
+            existing.description = item["description"]
+            existing.monthly_credits = item["monthly_credits"]
+            existing.price_cents = item["price_cents"]
+            existing.is_active = True
             continue
         db.add(Plan(**item, currency="usd", is_active=True))
     for item in PACKS:

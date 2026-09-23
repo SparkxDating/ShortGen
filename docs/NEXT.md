@@ -13,7 +13,7 @@ Without Pexels/OpenAI keys, ShortGen falls back to:
 - local script writer
 - topic-derived stock terms
 - Edge TTS
-- bundled stills as clips
+- studio title cards (Pillow + MoviePy) when stock returns nothing
 
 ```powershell
 pip install moviepy==2.2.1 edge-tts==7.2.7 imageio-ffmpeg pillow
@@ -43,7 +43,8 @@ CORS_ORIGINS=https://your-domain
 
 Webhook URL: `https://api.your-domain.com/api/v1/billing/webhooks/stripe`
 
-Credits are added only from verified webhooks, never from a success redirect.
+Plan checkout uses Stripe subscription mode. Each paid invoice (`invoice.paid`) adds that month's credits. A success redirect never adds credits.
+`POST /api/v1/billing/portal` opens the Stripe customer portal.
 `GET /api/v1/billing/status` reports whether Stripe is live-ready.
 
 ## 4. Later product
